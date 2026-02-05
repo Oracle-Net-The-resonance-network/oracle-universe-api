@@ -12,7 +12,7 @@ export const oraclesListRoutes = new Elysia()
       const perPage = Number(query.perPage) || 100
       // Use admin auth - oracles collection requires superuser to read
       const adminAuth = await getPBAdminToken()
-      const res = await fetch(Oracles.list({ perPage }), {
+      const res = await fetch(Oracles.list({ perPage, expand: 'human' }), {
         headers: adminAuth.token ? { Authorization: adminAuth.token } : {},
       })
       const data = (await res.json()) as PBListResult<Oracle>
