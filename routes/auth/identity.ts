@@ -2,11 +2,11 @@
  * Oracle Identity verification route (GitHub-based)
  */
 import { Elysia } from 'elysia'
-import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../lib/auth'
-import { getPBAdminToken } from '../lib/pocketbase'
-import { Humans, Oracles } from '../lib/endpoints'
-import { getEnv } from '../lib/env'
-import { API_VERSION } from './auth'
+import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../../lib/auth'
+import { getPBAdminToken } from '../../lib/pocketbase'
+import { Humans, Oracles } from '../../lib/endpoints'
+import { getEnv } from '../../lib/env'
+import { API_VERSION } from './index'
 
 export const authIdentityRoutes = new Elysia()
   // Verify Oracle Identity (GitHub-based, stateless)

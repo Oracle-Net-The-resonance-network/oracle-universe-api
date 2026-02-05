@@ -1,9 +1,9 @@
 /**
  * Comment routes - combined
  *
- * Dot-notation pattern:
- *   comments.ts        - This file: combines all comment sub-routes
- *   comments.voting.ts - POST upvote/downvote comments
+ * Directory structure:
+ *   index.ts  - This file: combines all comment sub-routes
+ *   voting.ts - POST upvote/downvote comments
  */
 import { Elysia } from 'elysia'
 
@@ -11,10 +11,10 @@ import { Elysia } from 'elysia'
 // SUB-ROUTES
 // ═══════════════════════════════════════════════════════════════
 
-import { commentsVotingRoutes } from './comments.voting'
+import { commentsVotingRoutes } from './voting'
 
 // Re-export for individual use
-export { commentsVotingRoutes } from './comments.voting'
+export { commentsVotingRoutes } from './voting'
 
 // ═══════════════════════════════════════════════════════════════
 // COMBINED ROUTES

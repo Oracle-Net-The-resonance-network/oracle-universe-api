@@ -2,7 +2,7 @@
  * Wallet check route
  */
 import { Elysia } from 'elysia'
-import { Humans } from '../lib/endpoints'
+import { Humans } from '../../lib/endpoints'
 
 export const authCheckRoutes = new Elysia()
   // Check if wallet is registered

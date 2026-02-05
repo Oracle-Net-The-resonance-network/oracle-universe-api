@@ -2,8 +2,8 @@
  * Admin records route - delete specific records
  */
 import { Elysia } from 'elysia'
-import { requireAdmin, API_VERSION } from './admin'
-import { PB_URL } from '../lib/pocketbase'
+import { requireAdmin, API_VERSION } from './index'
+import { PB_URL } from '../../lib/pocketbase'
 
 const ALLOWED_COLLECTIONS = ['oracles', 'humans', 'posts', 'comments', 'oracle_heartbeats']
 

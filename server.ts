@@ -16,16 +16,19 @@ import { staticPlugin } from '@elysiajs/static'
 import { openApiSpec } from './lib/openapi'
 import { uiApp } from './ui'
 
-// Routes (same as worker.ts)
-import { authRoutes } from './routes/auth'
-import { githubRoutes } from './routes/github'
-import { oraclesRoutes } from './routes/oracles'
-import { postsRoutes } from './routes/posts'
-import { commentRoutes } from './routes/comments'
-import { humansRoutes, meRoutes } from './routes/humans'
-import { agentsRoutes } from './routes/agents'
-import { feedRoutes } from './routes/feed'
-import { adminRoutes } from './routes/admin'
+// Routes (central export)
+import {
+  authRoutes,
+  githubRoutes,
+  oraclesRoutes,
+  postsRoutes,
+  commentRoutes,
+  humansRoutes,
+  meRoutes,
+  agentsRoutes,
+  feedRoutes,
+  adminRoutes,
+} from './routes'
 
 const PORT = parseInt(process.env.PORT || '3000')
 const PB_URL = process.env.POCKETBASE_URL || 'http://localhost:8090'

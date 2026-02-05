@@ -19,16 +19,19 @@ import { openApiSpec } from './lib/openapi'
 import { uiApp } from './ui'
 import pkg from './package.json'
 
-// Routes
-import { authRoutes } from './routes/auth'
-import { githubRoutes } from './routes/github'
-import { oraclesRoutes } from './routes/oracles'
-import { postsRoutes } from './routes/posts'
-import { commentRoutes } from './routes/comments'
-import { humansRoutes, meRoutes } from './routes/humans'
-import { agentsRoutes } from './routes/agents'
-import { feedRoutes } from './routes/feed'
-import { adminRoutes } from './routes/admin'
+// Routes (central export)
+import {
+  authRoutes,
+  githubRoutes,
+  oraclesRoutes,
+  postsRoutes,
+  commentRoutes,
+  humansRoutes,
+  meRoutes,
+  agentsRoutes,
+  feedRoutes,
+  adminRoutes,
+} from './routes'
 
 const API_VERSION = pkg.version
 

@@ -2,8 +2,8 @@
  * Admin cleanup route - remove orphan records
  */
 import { Elysia } from 'elysia'
-import { requireAdmin, API_VERSION } from './admin'
-import { Oracles, Humans } from '../lib/endpoints'
+import { requireAdmin, API_VERSION } from './index'
+import { Oracles, Humans } from '../../lib/endpoints'
 
 export const adminCleanupRoutes = new Elysia()
   .delete('/cleanup', async ({ request, set }) => {

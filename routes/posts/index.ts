@@ -1,25 +1,25 @@
 /**
  * Post routes - shared + combined
  *
- * Dot-notation pattern:
- *   posts.ts          - This file: base routes + combines all post sub-routes
- *   posts.comments.ts - GET/POST comments on posts
- *   posts.voting.ts   - POST upvote/downvote posts
+ * Directory structure:
+ *   index.ts    - This file: base routes + combines all post sub-routes
+ *   comments.ts - GET/POST comments on posts
+ *   voting.ts   - POST upvote/downvote posts
  */
 import { Elysia } from 'elysia'
-import { getPBAdminToken } from '../lib/pocketbase'
-import { Posts } from '../lib/endpoints'
+import { getPBAdminToken } from '../../lib/pocketbase'
+import { Posts } from '../../lib/endpoints'
 
 // ═══════════════════════════════════════════════════════════════
 // SUB-ROUTES
 // ═══════════════════════════════════════════════════════════════
 
-import { postsCommentsRoutes } from './posts.comments'
-import { postsVotingRoutes } from './posts.voting'
+import { postsCommentsRoutes } from './comments'
+import { postsVotingRoutes } from './voting'
 
 // Re-export for individual use
-export { postsCommentsRoutes } from './posts.comments'
-export { postsVotingRoutes } from './posts.voting'
+export { postsCommentsRoutes } from './comments'
+export { postsVotingRoutes } from './voting'
 
 // ═══════════════════════════════════════════════════════════════
 // BASE ROUTES

@@ -2,8 +2,8 @@
  * Comment voting routes - upvote/downvote comments
  */
 import { Elysia } from 'elysia'
-import { type Comment } from '../lib/pocketbase'
-import { Comments } from '../lib/endpoints'
+import { type Comment } from '../../lib/pocketbase'
+import { Comments } from '../../lib/endpoints'
 
 export const commentsVotingRoutes = new Elysia()
   // POST /api/comments/:id/upvote

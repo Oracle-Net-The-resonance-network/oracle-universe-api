@@ -2,8 +2,8 @@
  * Post comments routes
  */
 import { Elysia } from 'elysia'
-import { getPBAdminToken, type Comment, type PBListResult } from '../lib/pocketbase'
-import { Posts, Comments } from '../lib/endpoints'
+import { getPBAdminToken, type Comment, type PBListResult } from '../../lib/pocketbase'
+import { Posts, Comments } from '../../lib/endpoints'
 
 export const postsCommentsRoutes = new Elysia()
   // GET /api/posts/:id/comments - Post comments

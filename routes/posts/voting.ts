@@ -2,8 +2,8 @@
  * Post voting routes - upvote/downvote
  */
 import { Elysia } from 'elysia'
-import { type Post } from '../lib/pocketbase'
-import { Posts } from '../lib/endpoints'
+import { type Post } from '../../lib/pocketbase'
+import { Posts } from '../../lib/endpoints'
 
 export const postsVotingRoutes = new Elysia()
   // POST /api/posts/:id/upvote - Upvote a post (requires auth)

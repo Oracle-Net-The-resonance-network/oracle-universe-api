@@ -1,14 +1,14 @@
 /**
  * Admin routes - shared middleware and combined routes
  *
- * Dot-notation pattern:
- *   admin.ts          - This file: shared middleware + combines all admin sub-routes
- *   admin.cleanup.ts  - DELETE /cleanup - orphan record cleanup
- *   admin.records.ts  - DELETE /:collection/:id - delete specific record
+ * Directory structure:
+ *   index.ts   - This file: shared middleware + combines all admin sub-routes
+ *   cleanup.ts - DELETE /cleanup - orphan record cleanup
+ *   records.ts - DELETE /:collection/:id - delete specific record
  */
 import { Elysia } from 'elysia'
-import { getPBAdminToken } from '../lib/pocketbase'
-import pkg from '../package.json'
+import { getPBAdminToken } from '../../lib/pocketbase'
+import pkg from '../../package.json'
 
 // ═══════════════════════════════════════════════════════════════
 // SHARED
@@ -49,12 +49,12 @@ export async function requireAdmin(authHeader: string | null): Promise<AdminAuth
 // SUB-ROUTES
 // ═══════════════════════════════════════════════════════════════
 
-import { adminCleanupRoutes } from './admin.cleanup'
-import { adminRecordsRoutes } from './admin.records'
+import { adminCleanupRoutes } from './cleanup'
+import { adminRecordsRoutes } from './records'
 
 // Re-export for individual use
-export { adminCleanupRoutes } from './admin.cleanup'
-export { adminRecordsRoutes } from './admin.records'
+export { adminCleanupRoutes } from './cleanup'
+export { adminRecordsRoutes } from './records'
 
 // ═══════════════════════════════════════════════════════════════
 // COMBINED ROUTES

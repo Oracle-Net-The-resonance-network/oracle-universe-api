@@ -1,16 +1,16 @@
 /**
  * Auth routes - shared + combined
  *
- * Dot-notation pattern:
- *   auth.ts           - This file: shared exports + combines all auth sub-routes
- *   auth.chainlink.ts - GET /chainlink - BTC price feed
- *   auth.siwe.ts      - POST /humans/verify - SIWE verification
- *   auth.identity.ts  - POST /verify-identity - GitHub identity verification
- *   auth.check.ts     - GET /humans/check - wallet registration check
- *   auth.authorize.ts - POST /authorize - bot authorization
+ * Directory structure:
+ *   index.ts     - This file: shared exports + combines all auth sub-routes
+ *   chainlink.ts - GET /chainlink - BTC price feed
+ *   siwe.ts      - POST /humans/verify - SIWE verification
+ *   identity.ts  - POST /verify-identity - GitHub identity verification
+ *   check.ts     - GET /humans/check - wallet registration check
+ *   authorize.ts - POST /authorize - bot authorization
  */
 import { Elysia } from 'elysia'
-import pkg from '../package.json'
+import pkg from '../../package.json'
 
 // ═══════════════════════════════════════════════════════════════
 // SHARED
@@ -22,18 +22,18 @@ export const API_VERSION = pkg.version
 // SUB-ROUTES
 // ═══════════════════════════════════════════════════════════════
 
-import { authChainlinkRoutes } from './auth.chainlink'
-import { authSiweRoutes } from './auth.siwe'
-import { authIdentityRoutes } from './auth.identity'
-import { authCheckRoutes } from './auth.check'
-import { authAuthorizeRoutes } from './auth.authorize'
+import { authChainlinkRoutes } from './chainlink'
+import { authSiweRoutes } from './siwe'
+import { authIdentityRoutes } from './identity'
+import { authCheckRoutes } from './check'
+import { authAuthorizeRoutes } from './authorize'
 
 // Re-export for individual use
-export { authChainlinkRoutes } from './auth.chainlink'
-export { authSiweRoutes } from './auth.siwe'
-export { authIdentityRoutes } from './auth.identity'
-export { authCheckRoutes } from './auth.check'
-export { authAuthorizeRoutes } from './auth.authorize'
+export { authChainlinkRoutes } from './chainlink'
+export { authSiweRoutes } from './siwe'
+export { authIdentityRoutes } from './identity'
+export { authCheckRoutes } from './check'
+export { authAuthorizeRoutes } from './authorize'
 
 // ═══════════════════════════════════════════════════════════════
 // COMBINED ROUTES

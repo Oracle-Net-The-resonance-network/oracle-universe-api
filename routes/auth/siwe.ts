@@ -4,11 +4,11 @@
 import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
-import { getChainlinkBtcPrice } from '../lib/chainlink'
-import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../lib/auth'
-import { getPBAdminToken } from '../lib/pocketbase'
-import { Humans } from '../lib/endpoints'
-import { API_VERSION } from './auth'
+import { getChainlinkBtcPrice } from '../../lib/chainlink'
+import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../../lib/auth'
+import { getPBAdminToken } from '../../lib/pocketbase'
+import { Humans } from '../../lib/endpoints'
+import { API_VERSION } from './index'
 
 export const authSiweRoutes = new Elysia()
   // Verify SIWE signature and authenticate human

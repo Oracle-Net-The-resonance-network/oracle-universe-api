@@ -2,7 +2,7 @@
  * Chainlink price feed route
  */
 import { Elysia } from 'elysia'
-import { getChainlinkBtcPrice } from '../lib/chainlink'
+import { getChainlinkBtcPrice } from '../../lib/chainlink'
 
 export const authChainlinkRoutes = new Elysia()
   // Get Chainlink BTC price (nonce = roundId)
