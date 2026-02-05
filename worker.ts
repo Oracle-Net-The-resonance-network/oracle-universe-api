@@ -15,6 +15,9 @@ import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 import { openApiSpec } from './lib/openapi'
 import { uiApp } from './ui'
+import pkg from './package.json'
+
+const API_VERSION = pkg.version
 
 // Hash wallet + salt to create deterministic password
 // Using wallet address ensures same password every time for same user
@@ -73,13 +76,15 @@ const PB_URL = 'https://jellyfish-app-xml6o.ondigitalocean.app'
 
 // PocketBase admin auth (credentials in wrangler secrets)
 // Note: PocketBase v0.23+ uses _superusers collection, not /api/admins
-async function getPBAdminToken(): Promise<string | null> {
+async function getPBAdminToken(): Promise<{ token: string | null; error?: string }> {
   // @ts-ignore - secrets are injected by Cloudflare
   const email = typeof PB_ADMIN_EMAIL !== 'undefined' ? PB_ADMIN_EMAIL : null
   // @ts-ignore
   const password = typeof PB_ADMIN_PASSWORD !== 'undefined' ? PB_ADMIN_PASSWORD : null
 
-  if (!email || !password) return null
+  if (!email || !password) {
+    return { token: null, error: 'Missing PB_ADMIN_EMAIL or PB_ADMIN_PASSWORD secrets' }
+  }
 
   try {
     // PocketBase v0.23+: superusers are in _superusers collection
@@ -88,11 +93,14 @@ async function getPBAdminToken(): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identity: email, password }),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const errText = await res.text()
+      return { token: null, error: `PB admin auth failed (${res.status}): ${errText}` }
+    }
     const data = await res.json() as any
-    return data.token
-  } catch {
-    return null
+    return { token: data.token }
+  } catch (e: any) {
+    return { token: null, error: `PB admin auth exception: ${e.message}` }
   }
 }
 
@@ -176,7 +184,7 @@ const app = new Elysia({ adapter: CloudflareAdapter })
   // API info
   .get('/api', () => ({
     name: 'Oracle Universe API',
-    version: '1.0.0',
+    version: API_VERSION,
     pocketbase: PB_URL,
     docs: '/docs',
     openapi: '/openapi.json',
@@ -262,10 +270,15 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         human = searchData.items[0]
       } else {
         // Create new user - requires admin token
-        const adminToken = await getPBAdminToken()
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-        if (adminToken) {
-          headers['Authorization'] = adminToken
+        const adminAuth = await getPBAdminToken()
+        if (!adminAuth.token) {
+          set.status = 500
+          return { error: 'Failed to create human', details: adminAuth.error, version: API_VERSION }
+        }
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Authorization': adminAuth.token
         }
 
         const createRes = await fetch(`${PB_URL}/api/collections/humans/records`, {
@@ -283,7 +296,7 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         if (!createRes.ok) {
           const error = await createRes.text()
           set.status = 500
-          return { error: 'Failed to create human', details: error }
+          return { error: 'Failed to create human', details: error, version: API_VERSION }
         }
 
         human = await createRes.json()
@@ -396,16 +409,16 @@ const app = new Elysia({ adapter: CloudflareAdapter })
       const humanSearchData = await humanSearchRes.json() as any
 
       // Get admin token for human operations
-      const adminTokenForHuman = await getPBAdminToken()
+      const adminAuthForHuman = await getPBAdminToken()
 
       let human: any
       if (humanSearchData.items?.length > 0) {
         // Update existing human with GitHub username
         human = humanSearchData.items[0]
-        if (adminTokenForHuman) {
+        if (adminAuthForHuman.token) {
           const updateHumanRes = await fetch(`${PB_URL}/api/collections/humans/records/${human.id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': adminTokenForHuman },
+            headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthForHuman.token },
             body: JSON.stringify({ github_username: githubUsername, display_name: githubUsername })
           })
           if (updateHumanRes.ok) {
@@ -414,13 +427,15 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         }
       } else {
         // Create new human
+        if (!adminAuthForHuman.token) {
+          set.status = 500
+          return { error: 'Admin auth not configured - cannot create human', details: adminAuthForHuman.error, version: API_VERSION }
+        }
         const email = `${walletAddress}@human.oracle.universe`
         const password = await hashWalletPassword(walletAddress, DEFAULT_SALT)
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-        if (adminTokenForHuman) headers['Authorization'] = adminTokenForHuman
         const createHumanRes = await fetch(`${PB_URL}/api/collections/humans/records`, {
           method: 'POST',
-          headers,
+          headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthForHuman.token },
           body: JSON.stringify({
             email,
             password,
@@ -433,7 +448,7 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         if (!createHumanRes.ok) {
           const err = await createHumanRes.text()
           set.status = 500
-          return { error: 'Failed to create human', details: err }
+          return { error: 'Failed to create human', details: err, version: API_VERSION }
         }
         human = await createHumanRes.json()
       }
@@ -447,11 +462,11 @@ const app = new Elysia({ adapter: CloudflareAdapter })
       if (oracleCheckData.items?.length > 0) {
         // Update existing oracle (requires admin auth)
         oracle = oracleCheckData.items[0]
-        const adminTokenForUpdate = await getPBAdminToken()
-        if (adminTokenForUpdate) {
+        const adminAuthForUpdate = await getPBAdminToken()
+        if (adminAuthForUpdate.token) {
           const updateOracleRes = await fetch(`${PB_URL}/api/collections/oracles/records/${oracle.id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': adminTokenForUpdate },
+            headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthForUpdate.token },
             body: JSON.stringify({ human: human.id, oracle_name: finalOracleName, claimed: true })
           })
           if (updateOracleRes.ok) {
@@ -460,15 +475,15 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         }
       } else {
         // Create new oracle (requires admin auth since it's an auth collection)
-        const adminToken = await getPBAdminToken()
-        if (!adminToken) {
+        const adminAuthForOracle = await getPBAdminToken()
+        if (!adminAuthForOracle.token) {
           set.status = 500
-          return { error: 'Admin auth not configured - cannot create oracle' }
+          return { error: 'Admin auth not configured - cannot create oracle', details: adminAuthForOracle.error, version: API_VERSION }
         }
         const oraclePassword = await hashWalletPassword(birthIssueUrl, DEFAULT_SALT)
         const createOracleRes = await fetch(`${PB_URL}/api/collections/oracles/records`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
+          headers: { 'Content-Type': 'application/json', 'Authorization': adminAuthForOracle.token },
           body: JSON.stringify({
             name: githubUsername,
             oracle_name: finalOracleName,
@@ -985,18 +1000,18 @@ const app = new Elysia({ adapter: CloudflareAdapter })
   .delete('/api/admin/cleanup', async ({ request, set }) => {
     // Verify admin token in header
     const authHeader = request.headers.get('Authorization')
-    const adminToken = await getPBAdminToken()
+    const adminAuth = await getPBAdminToken()
 
-    if (!adminToken) {
+    if (!adminAuth.token) {
       set.status = 500
-      return { error: 'Admin credentials not configured' }
+      return { error: 'Admin credentials not configured', details: adminAuth.error, version: API_VERSION }
     }
 
     // Simple auth: require the request to include a valid admin header
     // For now, just check if admin token can be obtained (means secrets are set)
     if (!authHeader || !authHeader.includes('admin')) {
       set.status = 401
-      return { error: 'Admin access required. Use Authorization: admin' }
+      return { error: 'Admin access required. Use Authorization: admin', version: API_VERSION }
     }
 
     const deleted: string[] = []
@@ -1010,7 +1025,7 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         if (!oracle.birth_issue) {
           const delRes = await fetch(`${PB_URL}/api/collections/oracles/records/${oracle.id}`, {
             method: 'DELETE',
-            headers: { 'Authorization': adminToken },
+            headers: { 'Authorization': adminAuth.token },
           })
           if (delRes.ok) deleted.push(`oracle:${oracle.id}`)
         }
@@ -1024,32 +1039,32 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         if (!human.wallet_address) {
           const delRes = await fetch(`${PB_URL}/api/collections/humans/records/${human.id}`, {
             method: 'DELETE',
-            headers: { 'Authorization': adminToken },
+            headers: { 'Authorization': adminAuth.token },
           })
           if (delRes.ok) deleted.push(`human:${human.id}`)
         }
       }
 
-      return { success: true, deleted, count: deleted.length }
+      return { success: true, deleted, count: deleted.length, version: API_VERSION }
     } catch (e: any) {
       set.status = 500
-      return { error: 'Cleanup failed', details: e.message }
+      return { error: 'Cleanup failed', details: e.message, version: API_VERSION }
     }
   })
 
   // Admin: delete specific record
   .delete('/api/admin/:collection/:id', async ({ params, request, set }) => {
     const authHeader = request.headers.get('Authorization')
-    const adminToken = await getPBAdminToken()
+    const adminAuth = await getPBAdminToken()
 
-    if (!adminToken) {
+    if (!adminAuth.token) {
       set.status = 500
-      return { error: 'Admin credentials not configured' }
+      return { error: 'Admin credentials not configured', details: adminAuth.error, version: API_VERSION }
     }
 
     if (!authHeader || !authHeader.includes('admin')) {
       set.status = 401
-      return { error: 'Admin access required' }
+      return { error: 'Admin access required', version: API_VERSION }
     }
 
     const { collection, id } = params
@@ -1063,18 +1078,18 @@ const app = new Elysia({ adapter: CloudflareAdapter })
     try {
       const res = await fetch(`${PB_URL}/api/collections/${collection}/records/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': adminToken },
+        headers: { 'Authorization': adminAuth.token },
       })
 
       if (!res.ok) {
         set.status = res.status
-        return { error: 'Delete failed', status: res.status }
+        return { error: 'Delete failed', status: res.status, version: API_VERSION }
       }
 
-      return { success: true, deleted: `${collection}:${id}` }
+      return { success: true, deleted: `${collection}:${id}`, version: API_VERSION }
     } catch (e: any) {
       set.status = 500
-      return { error: 'Delete failed', details: e.message }
+      return { error: 'Delete failed', details: e.message, version: API_VERSION }
     }
   })
 
