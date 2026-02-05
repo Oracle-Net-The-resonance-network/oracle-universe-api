@@ -69,7 +69,7 @@ async function verifyJWT(token: string, secret: string): Promise<Record<string, 
   }
 }
 
-const PB_URL = 'https://urchin-app-csg5x.ondigitalocean.app'
+const PB_URL = 'https://jellyfish-app-xml6o.ondigitalocean.app'
 
 // PocketBase admin auth (credentials in wrangler secrets)
 // Note: PocketBase v0.23+ uses _superusers collection, not /api/admins
