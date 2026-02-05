@@ -2,7 +2,8 @@
  * Agent routes - /api/agents/*
  */
 import { Elysia } from 'elysia'
-import { pbFetch, type PBListResult } from '../lib/pocketbase'
+import { type PBListResult } from '../lib/pocketbase'
+import { Agents, Heartbeats } from '../lib/endpoints'
 
 export interface Agent {
   id: string
@@ -26,20 +27,14 @@ export const agentsRoutes = new Elysia({ prefix: '/api/agents' })
   // GET /api/agents - List recent agents (public)
   .get('/', async ({ query, set }) => {
     try {
-      const perPage = query.perPage || '10'
-      const sort = query.sort || '-created'
+      const perPage = Number(query.perPage) || 10
+      const sort = (query.sort as string) || '-created'
 
-      const params = new URLSearchParams({
-        perPage,
-        sort,
-      })
-
-      const result = await pbFetch<PBListResult<Agent>>(
-        `/api/collections/agents/records?${params}`
-      )
+      const res = await fetch(Agents.list({ perPage, sort }))
+      const data = (await res.json()) as PBListResult<Agent>
 
       // Don't expose wallet_address publicly
-      const items = result.items.map(agent => ({
+      const items = (data.items || []).map(agent => ({
         id: agent.id,
         display_name: agent.display_name,
         reputation: agent.reputation,
@@ -51,9 +46,10 @@ export const agentsRoutes = new Elysia({ prefix: '/api/agents' })
         count: items.length,
         items,
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       set.status = 500
-      return { error: e.message }
+      const message = e instanceof Error ? e.message : String(e)
+      return { error: message }
     }
   })
 
@@ -67,49 +63,39 @@ export const agentsRoutes = new Elysia({ prefix: '/api/agents' })
 
     try {
       // Forward auth to PocketBase
-      const result = await pbFetch<Agent>(
-        '/api/agents/me',
-        { authToken: authHeader }
-      )
-      return {
-        id: result.id,
-        wallet_address: result.wallet_address,
-        display_name: result.display_name,
-        reputation: result.reputation,
-        verified: result.verified,
+      const res = await fetch(Agents.me(), {
+        headers: { Authorization: authHeader },
+      })
+      if (!res.ok) {
+        set.status = 401
+        return { error: 'Invalid authentication' }
       }
-    } catch (e: any) {
+      const agent = (await res.json()) as Agent
+      return {
+        id: agent.id,
+        wallet_address: agent.wallet_address,
+        display_name: agent.display_name,
+        reputation: agent.reputation,
+        verified: agent.verified,
+      }
+    } catch {
       set.status = 401
       return { error: 'Invalid authentication' }
     }
   })
 
   // GET /api/agents/presence - Online agents
-  .get('/presence', async ({ set }) => {
+  .get('/presence', async () => {
     try {
-      // Get recent heartbeats (within 5 minutes)
-      const params = new URLSearchParams({
-        filter: 'created > @now - 300',
-        sort: '-created',
-        perPage: '100',
-      })
-
-      const result = await pbFetch<PBListResult<AgentHeartbeat>>(
-        `/api/collections/agent_heartbeats/records?${params}`
-      )
-
-      const items = result.items.map(hb => ({
+      const res = await fetch(Heartbeats.agents({ filter: 'created > @now - 300', sort: '-created', perPage: 100 }))
+      const data = (await res.json()) as PBListResult<AgentHeartbeat>
+      const items = (data.items || []).map(hb => ({
         id: hb.agent,
         status: hb.status,
         lastSeen: hb.updated,
       }))
-
-      return {
-        items,
-        totalOnline: items.length,
-      }
-    } catch (e: any) {
-      set.status = 500
+      return { items, totalOnline: items.length }
+    } catch {
       return { items: [], totalOnline: 0 }
     }
   })

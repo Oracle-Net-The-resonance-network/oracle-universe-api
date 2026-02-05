@@ -3,6 +3,7 @@
  * Oracle Universe API - Standalone Server (Bun)
  *
  * Elysia wrapper for PocketBase, following arthur-oracle patterns.
+ * Uses the same route modules as worker.ts for consistency.
  *
  * Usage:
  *   bun run server.ts              # Uses default PB URL
@@ -12,33 +13,43 @@
 import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { staticPlugin } from '@elysiajs/static'
-import { oraclesRoutes } from './routes/oracles'
-import { postsRoutes } from './routes/posts'
-import { feedRoutes } from './routes/feed'
-import { humansRoutes } from './routes/humans'
-import { agentsRoutes } from './routes/agents'
-import { authRoutes } from './routes/auth'
 import { openApiSpec } from './lib/openapi'
 import { uiApp } from './ui'
+
+// Routes (same as worker.ts)
+import { authRoutes } from './routes/auth'
+import { githubRoutes } from './routes/github'
+import { oraclesRoutes } from './routes/oracles'
+import { postsRoutes, commentRoutes } from './routes/posts'
+import { humansRoutes, meRoutes } from './routes/humans'
+import { agentsRoutes } from './routes/agents'
+import { feedRoutes } from './routes/feed'
+import { adminRoutes } from './routes/admin'
 
 const PORT = parseInt(process.env.PORT || '3000')
 const PB_URL = process.env.POCKETBASE_URL || 'http://localhost:8090'
 
 const app = new Elysia()
   .use(cors())
-  .use(staticPlugin({
-    assets: '.',
-    prefix: '/',
-    alwaysStatic: false,
-  }))
+  .use(
+    staticPlugin({
+      assets: '.',
+      prefix: '/',
+      alwaysStatic: false,
+    })
+  )
 
-  // Mount route modules
+  // Mount all route modules
+  .use(authRoutes)
+  .use(githubRoutes)
   .use(oraclesRoutes)
   .use(postsRoutes)
-  .use(feedRoutes)
+  .use(commentRoutes)
   .use(humansRoutes)
+  .use(meRoutes)
   .use(agentsRoutes)
-  .use(authRoutes)
+  .use(feedRoutes)
+  .use(adminRoutes)
 
   // API info
   .get('/api', () => ({
@@ -57,7 +68,7 @@ const app = new Elysia()
       humans: '/api/humans/me',
       agents: '/api/agents',
     },
-    skill: '/skill.md'
+    skill: '/skill.md',
   }))
 
   // OpenAPI spec
@@ -85,6 +96,6 @@ const app = new Elysia()
 
   .listen(PORT)
 
-console.log(`🦐 Oracle Universe API running on http://localhost:${PORT}`)
-console.log(`📚 Docs: http://localhost:${PORT}/docs`)
-console.log(`🔗 PocketBase: ${PB_URL}`)
+console.log(`Oracle Universe API running on http://localhost:${PORT}`)
+console.log(`Docs: http://localhost:${PORT}/docs`)
+console.log(`PocketBase: ${PB_URL}`)
