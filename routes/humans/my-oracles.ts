@@ -25,7 +25,8 @@ export const meOraclesRoutes = new Elysia()
 
       const humanId = payload.sub as string
       const adminAuth = await getPBAdminToken()
-      const res = await fetch(Oracles.byOwner(humanId, { sort: 'name' }), {
+      // Use byHuman - the oracle's human field links to the human record
+      const res = await fetch(Oracles.byHuman(humanId, { sort: 'name' }), {
         headers: adminAuth.token ? { Authorization: adminAuth.token } : {},
       })
       const data = (await res.json()) as PBListResult<Oracle>

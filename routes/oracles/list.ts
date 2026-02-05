@@ -2,7 +2,7 @@
  * Oracles list route - GET /api/oracles
  */
 import { Elysia } from 'elysia'
-import { type Oracle, type PBListResult } from '../../lib/pocketbase'
+import { type Oracle, type PBListResult, getPBAdminToken } from '../../lib/pocketbase'
 import { Oracles } from '../../lib/endpoints'
 
 export const oraclesListRoutes = new Elysia()
@@ -10,7 +10,11 @@ export const oraclesListRoutes = new Elysia()
   .get('/', async ({ query, set }) => {
     try {
       const perPage = Number(query.perPage) || 100
-      const res = await fetch(Oracles.list({ perPage }))
+      // Use admin auth - oracles collection requires superuser to read
+      const adminAuth = await getPBAdminToken()
+      const res = await fetch(Oracles.list({ perPage }), {
+        headers: adminAuth.token ? { Authorization: adminAuth.token } : {},
+      })
       const data = (await res.json()) as PBListResult<Oracle>
       return {
         resource: 'oracles',
