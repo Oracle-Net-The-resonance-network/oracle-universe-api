@@ -261,10 +261,16 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         // Existing user - use their record
         human = searchData.items[0]
       } else {
-        // Create new user (no password needed for signature-based auth)
+        // Create new user - requires admin token
+        const adminToken = await getPBAdminToken()
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        if (adminToken) {
+          headers['Authorization'] = adminToken
+        }
+
         const createRes = await fetch(`${PB_URL}/api/collections/humans/records`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             email: `${walletAddress}@human.oracle.universe`,
             password: await hashWalletPassword(walletAddress, DEFAULT_SALT),
