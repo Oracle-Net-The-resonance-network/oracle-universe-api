@@ -41,7 +41,7 @@ export const humansByGithubRoutes = new Elysia()
 
       const humanId = humanData.items[0].id
       const oracleRes = await fetch(
-        Oracles.byOwner(humanId, { filter: 'birth_issue != ""', sort: 'name', expand: 'owner' }),
+        Oracles.byHuman(humanId, { filter: 'birth_issue != ""', sort: 'name', expand: 'human' }),
         { headers }
       )
       const oracleData = (await oracleRes.json()) as PBListResult<Oracle>

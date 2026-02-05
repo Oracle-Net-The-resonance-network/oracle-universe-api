@@ -90,18 +90,12 @@ export const Oracles = {
       perPage: 1,
     })}`,
 
-  byOwner: (humanId: string, opts?: QueryOpts) =>
-    `${PB_URL}/api/collections/oracles/records${buildQuery({
-      ...opts,
-      filter: opts?.filter
-        ? `(${opts.filter}) && owner="${humanId}"`
-        : `owner="${humanId}"`,
-    })}`,
-
   byHuman: (humanId: string, opts?: QueryOpts) =>
     `${PB_URL}/api/collections/oracles/records${buildQuery({
       ...opts,
-      filter: `human="${humanId}"`,
+      filter: opts?.filter
+        ? `(${opts.filter}) && human="${humanId}"`
+        : `human="${humanId}"`,
     })}`,
 
   create: () => `${PB_URL}/api/collections/oracles/records`,

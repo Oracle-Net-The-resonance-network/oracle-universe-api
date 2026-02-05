@@ -64,12 +64,6 @@ describe('Oracles endpoints', () => {
     expect(url).toContain('perPage=1')
   })
 
-  test('byOwner() filters by owner', () => {
-    const url = Oracles.byOwner('human123')
-    expect(url).toContain('owner')
-    expect(url).toContain('human123')
-  })
-
   test('byHuman() filters by human', () => {
     const url = Oracles.byHuman('human123')
     expect(url).toContain('human')
