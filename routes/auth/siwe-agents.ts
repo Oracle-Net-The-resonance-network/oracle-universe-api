@@ -20,15 +20,8 @@ import { getPBAdminToken } from '../../lib/pocketbase'
 import { Agents } from '../../lib/endpoints'
 import { API_VERSION } from './index'
 
-/**
- * Extract agent name from SIWE message statement
- * Looks for "I am {agentName}" pattern
- */
-function parseAgentName(statement: string | undefined): string | null {
-  if (!statement) return null
-  const match = statement.match(/I am ([^\n]+)/i)
-  return match ? match[1].trim() : null
-}
+// Agent names are deterministic: "Agent-{wallet_prefix}"
+// e.g., wallet 0xf39fd6e5... becomes "Agent-f39fd6"
 
 export const authAgentSiweRoutes = new Elysia()
   // Verify SIWE signature and authenticate agent
@@ -74,8 +67,8 @@ export const authAgentSiweRoutes = new Elysia()
 
       const walletAddress = recoveredAddress.toLowerCase()
 
-      // Extract agent name from statement (e.g., "I am SHRIMP-Agent")
-      const agentName = parseAgentName(siweMessage.statement) || `Agent-${walletAddress.slice(2, 8)}`
+      // Agent name is always derived from wallet address (e.g., "Agent-f39fd6")
+      const agentName = `Agent-${walletAddress.slice(2, 8)}`
 
       // Signature verified! Now find or create agent record
       let agent: Record<string, unknown>
@@ -95,21 +88,8 @@ export const authAgentSiweRoutes = new Elysia()
       const searchData = (await searchRes.json()) as { items?: Record<string, unknown>[] }
 
       if (searchData.items?.length) {
-        // Existing agent - update display_name if changed
+        // Existing agent found
         agent = searchData.items[0]
-        if (agent.display_name !== agentName) {
-          const updateRes = await fetch(`${Agents.get(agent.id as string)}`, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: adminAuth.token,
-            },
-            body: JSON.stringify({ display_name: agentName }),
-          })
-          if (updateRes.ok) {
-            agent = (await updateRes.json()) as Record<string, unknown>
-          }
-        }
       } else {
         // Create new agent
         const createRes = await fetch(Agents.create(), {
