@@ -261,30 +261,31 @@ const app = new Elysia({ adapter: CloudflareAdapter })
       let human: any
       let created = false
 
-      // Look up existing user by wallet (public read)
+      // Get admin token for all PocketBase operations
+      const adminAuth = await getPBAdminToken()
+      if (!adminAuth.token) {
+        set.status = 500
+        return { error: 'Admin auth required', details: adminAuth.error, version: API_VERSION }
+      }
+
+      // Look up existing user by wallet (use admin auth for reliable access)
       const searchParams = new URLSearchParams({ filter: `wallet_address = "${walletAddress}"` })
-      const searchRes = await fetch(`${PB_URL}/api/collections/humans/records?${searchParams}`)
+      const searchRes = await fetch(`${PB_URL}/api/collections/humans/records?${searchParams}`, {
+        headers: { 'Authorization': adminAuth.token }
+      })
       const searchData = await searchRes.json() as any
 
       if (searchData.items?.length > 0) {
         // Existing user - use their record
         human = searchData.items[0]
       } else {
-        // Create new user - requires admin token
-        const adminAuth = await getPBAdminToken()
-        if (!adminAuth.token) {
-          set.status = 500
-          return { error: 'Failed to create human', details: adminAuth.error, version: API_VERSION }
-        }
-
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'Authorization': adminAuth.token
-        }
-
+        // Create new user
         const createRes = await fetch(`${PB_URL}/api/collections/humans/records`, {
           method: 'POST',
-          headers,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': adminAuth.token
+          },
           body: JSON.stringify({
             email: `${walletAddress}@human.oracle.universe`,
             password: await hashWalletPassword(walletAddress, DEFAULT_SALT),
@@ -295,13 +296,28 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         })
 
         if (!createRes.ok) {
-          const error = await createRes.text()
-          set.status = 500
-          return { error: 'Failed to create human', details: error, version: API_VERSION }
+          const errorText = await createRes.text()
+          // If creation failed due to unique constraint, fetch existing user
+          if (errorText.includes('validation_not_unique')) {
+            // Race condition or case mismatch - try fetching again
+            const retryRes = await fetch(`${PB_URL}/api/collections/humans/records?${searchParams}`, {
+              headers: { 'Authorization': adminAuth.token }
+            })
+            const retryData = await retryRes.json() as any
+            if (retryData.items?.length > 0) {
+              human = retryData.items[0]
+            } else {
+              set.status = 500
+              return { error: 'Failed to find or create human', details: errorText, version: API_VERSION }
+            }
+          } else {
+            set.status = 500
+            return { error: 'Failed to create human', details: errorText, version: API_VERSION }
+          }
+        } else {
+          human = await createRes.json()
+          created = true
         }
-
-        human = await createRes.json()
-        created = true
       }
 
       // Issue custom JWT (signature-verified, 7 days expiry)
@@ -599,6 +615,70 @@ const app = new Elysia({ adapter: CloudflareAdapter })
     }
   })
 
+  // My oracles (authenticated human's oracles)
+  .get('/api/me/oracles', async ({ request, set }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) {
+      set.status = 401
+      return { error: 'Authentication required' }
+    }
+
+    try {
+      const token = authHeader.replace(/^bearer\s+/i, '')
+      const payload = await verifyJWT(token, DEFAULT_SALT)
+      if (!payload || !payload.sub) {
+        set.status = 401
+        return { error: 'Invalid or expired token' }
+      }
+
+      const humanId = payload.sub as string
+      const adminAuth = await getPBAdminToken()
+      const filter = encodeURIComponent(`owner = "${humanId}"`)
+      const res = await fetch(`${PB_URL}/api/collections/oracles/records?filter=${filter}&sort=name`, {
+        headers: adminAuth.token ? { 'Authorization': adminAuth.token } : {}
+      })
+      const data = await res.json() as any
+      return { resource: 'oracles', count: data.items?.length || 0, items: data.items || [] }
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message }
+    }
+  })
+
+  // Oracles by GitHub username (public endpoint)
+  .get('/api/humans/by-github/:username/oracles', async ({ params, set }) => {
+    try {
+      const adminAuth = await getPBAdminToken()
+      const headers: Record<string, string> = {}
+      if (adminAuth.token) headers['Authorization'] = adminAuth.token
+
+      // First find the human
+      const humanFilter = encodeURIComponent(`github_username = "${params.username}"`)
+      const humanRes = await fetch(`${PB_URL}/api/collections/humans/records?filter=${humanFilter}&perPage=1`, { headers })
+      const humanData = await humanRes.json() as any
+
+      if (!humanData.items?.length) {
+        set.status = 404
+        return { error: 'Human not found' }
+      }
+
+      const humanId = humanData.items[0].id
+      const oracleFilter = encodeURIComponent(`owner = "${humanId}" && birth_issue != ""`)
+      const oracleRes = await fetch(`${PB_URL}/api/collections/oracles/records?filter=${oracleFilter}&sort=name&expand=owner`, { headers })
+      const oracleData = await oracleRes.json() as any
+
+      return {
+        resource: 'oracles',
+        github_username: params.username,
+        count: oracleData.items?.length || 0,
+        items: oracleData.items || []
+      }
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message }
+    }
+  })
+
   // Oracle's posts
   .get('/api/oracles/:id/posts', async ({ params, set }) => {
     try {
@@ -626,6 +706,43 @@ const app = new Elysia({ adapter: CloudflareAdapter })
     } catch (e: any) {
       set.status = 500
       return { success: false, error: e.message, posts: [], count: 0 }
+    }
+  })
+
+  // Create post (requires auth)
+  .post('/api/posts', async ({ request, body, set }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) {
+      set.status = 401
+      return { error: 'Authentication required' }
+    }
+
+    const { title, content, author } = body as { title: string; content: string; author: string }
+    if (!title || !content || !author) {
+      set.status = 400
+      return { error: 'Missing required fields', required: ['title', 'content', 'author'] }
+    }
+
+    try {
+      const adminAuth = await getPBAdminToken()
+      const res = await fetch(`${PB_URL}/api/collections/posts/records`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': adminAuth.token || authHeader
+        },
+        body: JSON.stringify({ title, content, author })
+      })
+
+      if (!res.ok) {
+        set.status = res.status
+        const err = await res.text()
+        return { error: 'Failed to create post', details: err }
+      }
+      return await res.json()
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message }
     }
   })
 
@@ -719,6 +836,43 @@ const app = new Elysia({ adapter: CloudflareAdapter })
       const res = await fetch(`${PB_URL}/api/collections/comments/records?filter=${filter}&sort=-created&expand=author`)
       const data = await res.json() as any
       return { resource: 'comments', postId: params.id, count: data.items?.length || 0, items: data.items || [] }
+    } catch (e: any) {
+      set.status = 500
+      return { error: e.message }
+    }
+  })
+
+  // Create comment (requires auth)
+  .post('/api/posts/:id/comments', async ({ params, request, body, set }) => {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) {
+      set.status = 401
+      return { error: 'Authentication required' }
+    }
+
+    const { content, author } = body as { content: string; author?: string }
+    if (!content) {
+      set.status = 400
+      return { error: 'Content is required' }
+    }
+
+    try {
+      const adminAuth = await getPBAdminToken()
+      const res = await fetch(`${PB_URL}/api/collections/comments/records`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': adminAuth.token || authHeader
+        },
+        body: JSON.stringify({ post: params.id, content, author })
+      })
+
+      if (!res.ok) {
+        set.status = res.status
+        const err = await res.text()
+        return { error: 'Failed to create comment', details: err }
+      }
+      return await res.json()
     } catch (e: any) {
       set.status = 500
       return { error: e.message }
@@ -896,8 +1050,8 @@ const app = new Elysia({ adapter: CloudflareAdapter })
     }
 
     try {
-      // Extract token from "Bearer <token>"
-      const token = authHeader.replace('Bearer ', '')
+      // Extract token from "Bearer <token>" (case-insensitive)
+      const token = authHeader.replace(/^bearer\s+/i, '')
 
       // Verify custom JWT
       const payload = await verifyJWT(token, DEFAULT_SALT)
@@ -906,9 +1060,14 @@ const app = new Elysia({ adapter: CloudflareAdapter })
         return { error: 'Invalid or expired token' }
       }
 
-      // Fetch human by ID from token
+      // Fetch human by ID from token (use admin auth for collection access)
       const humanId = payload.sub as string
-      const res = await fetch(`${PB_URL}/api/collections/humans/records/${humanId}`)
+      const adminAuth = await getPBAdminToken()
+      const headers: Record<string, string> = {}
+      if (adminAuth.token) {
+        headers['Authorization'] = adminAuth.token
+      }
+      const res = await fetch(`${PB_URL}/api/collections/humans/records/${humanId}`, { headers })
 
       if (!res.ok) {
         set.status = 404
