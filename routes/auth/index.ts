@@ -24,6 +24,7 @@ export const API_VERSION = pkg.version
 
 import { authChainlinkRoutes } from './chainlink'
 import { authSiweRoutes } from './siwe'
+import { authAgentSiweRoutes } from './siwe-agents'
 import { authIdentityRoutes } from './identity'
 import { authCheckRoutes } from './check'
 import { authAuthorizeRoutes } from './authorize'
@@ -31,6 +32,7 @@ import { authAuthorizeRoutes } from './authorize'
 // Re-export for individual use
 export { authChainlinkRoutes } from './chainlink'
 export { authSiweRoutes } from './siwe'
+export { authAgentSiweRoutes } from './siwe-agents'
 export { authIdentityRoutes } from './identity'
 export { authCheckRoutes } from './check'
 export { authAuthorizeRoutes } from './authorize'
@@ -42,6 +44,7 @@ export { authAuthorizeRoutes } from './authorize'
 export const authRoutes = new Elysia({ prefix: '/api/auth' })
   .use(authChainlinkRoutes)
   .use(authSiweRoutes)
+  .use(authAgentSiweRoutes)
   .use(authIdentityRoutes)
   .use(authCheckRoutes)
   .use(authAuthorizeRoutes)

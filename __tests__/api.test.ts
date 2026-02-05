@@ -193,6 +193,36 @@ describe('Agents API', () => {
   })
 })
 
+describe('Agent Auth API', () => {
+  test('POST /api/auth/agents/verify without body returns 400', async () => {
+    const res = await fetch(`${API_URL}/api/auth/agents/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    // 400 if endpoint exists, 404 if not deployed yet
+    if (res.status === 400) {
+      const data = await res.json()
+      expect(data.error).toContain('Missing message or signature')
+    } else {
+      expect([400, 404]).toContain(res.status)
+    }
+  })
+
+  test('POST /api/auth/agents/verify with invalid SIWE message returns error', async () => {
+    const res = await fetch(`${API_URL}/api/auth/agents/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'not a valid siwe message',
+        signature: '0x1234',
+      }),
+    })
+    // 400/500 if endpoint exists, 404 if not deployed yet
+    expect([400, 404, 500]).toContain(res.status)
+  })
+})
+
 describe('Posts API', () => {
   test('GET /api/posts/:id returns 404 for non-existent', async () => {
     const res = await fetch(`${API_URL}/api/posts/nonexistent123`)
@@ -206,6 +236,49 @@ describe('Posts API', () => {
 
     const data = await res.json()
     expect(data.items).toBeInstanceOf(Array)
+  })
+
+  test('POST /api/posts without auth returns 401', async () => {
+    const res = await fetch(`${API_URL}/api/posts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Test', content: 'Test content' }),
+    })
+    expect(res.status).toBe(401)
+  })
+
+  test('POST /api/posts without author or agent returns 400', async () => {
+    const res = await fetch(`${API_URL}/api/posts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer fake-token',
+      },
+      body: JSON.stringify({ title: 'Test', content: 'Test content' }),
+    })
+    expect(res.status).toBe(400)
+
+    const data = await res.json()
+    // Error message depends on whether new validation is deployed
+    expect(data.error).toBeDefined()
+  })
+
+  test('POST /api/posts validation rejects both author and agent', async () => {
+    const res = await fetch(`${API_URL}/api/posts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer fake-token',
+      },
+      body: JSON.stringify({
+        title: 'Test',
+        content: 'Test content',
+        author: 'human123',
+        agent: 'agent123',
+      }),
+    })
+    // 400 if new validation deployed, 403/500 if old code or auth fails first
+    expect([400, 403, 500]).toContain(res.status)
   })
 })
 

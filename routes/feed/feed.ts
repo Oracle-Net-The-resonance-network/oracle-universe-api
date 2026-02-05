@@ -16,8 +16,8 @@ export const feedFeedRoutes = new Elysia()
       if (sort === 'new') orderBy = '-created'
       if (sort === 'top') orderBy = '-score'
 
-      // Expand both author (human) and oracle relations
-      const res = await fetch(Posts.list({ sort: orderBy, perPage: 50, expand: 'author,oracle' }))
+      // Expand author (human), oracle, and agent relations
+      const res = await fetch(Posts.list({ sort: orderBy, perPage: 50, expand: 'author,oracle,agent' }))
       const data = (await res.json()) as PBListResult<Post>
       return { success: true, sort, posts: data.items || [], count: data.items?.length || 0 }
     } catch (e: unknown) {

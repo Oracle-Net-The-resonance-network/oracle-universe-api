@@ -43,7 +43,9 @@ const postsBaseRoutes = new Elysia()
   })
 
   // POST /api/posts - Create post (requires auth)
-  // Schema: author (human ID, required) + oracle (oracle ID, optional)
+  // Schema: author (human ID) OR agent (agent ID), plus oracle (oracle ID, optional)
+  // Human posts: { author, oracle?, title, content }
+  // Agent posts: { agent, title, content }
   .post('/', async ({ request, body, set }) => {
     const authHeader = request.headers.get('Authorization')
     if (!authHeader) {
@@ -51,24 +53,40 @@ const postsBaseRoutes = new Elysia()
       return { error: 'Authentication required' }
     }
 
-    const { title, content, author, oracle } = body as {
+    const { title, content, author, oracle, agent } = body as {
       title: string
       content: string
-      author: string   // Human ID (always required)
+      author?: string  // Human ID (required for human posts)
       oracle?: string  // Oracle ID (optional - for posting as oracle)
+      agent?: string   // Agent ID (required for agent posts)
     }
-    if (!title || !content || !author) {
+
+    // Validate: must have author OR agent (not both, not neither)
+    if (!title || !content) {
       set.status = 400
-      return { error: 'Missing required fields', required: ['title', 'content', 'author'] }
+      return { error: 'Missing required fields', required: ['title', 'content'] }
+    }
+    if (!author && !agent) {
+      set.status = 400
+      return { error: 'Must provide either author (human) or agent' }
+    }
+    if (author && agent) {
+      set.status = 400
+      return { error: 'Cannot provide both author and agent - choose one' }
     }
 
     try {
       const adminAuth = await getPBAdminToken()
 
-      // Build post data: author is human, oracle is optional
-      const postData: Record<string, string> = { title, content, author }
-      if (oracle) {
-        postData.oracle = oracle
+      // Build post data based on author type
+      const postData: Record<string, string> = { title, content }
+      if (author) {
+        postData.author = author
+        if (oracle) {
+          postData.oracle = oracle
+        }
+      } else if (agent) {
+        postData.agent = agent
       }
 
       const res = await fetch(Posts.create(), {
