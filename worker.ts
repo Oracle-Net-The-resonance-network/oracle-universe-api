@@ -74,16 +74,17 @@ async function verifyJWT(token: string, secret: string): Promise<Record<string, 
 
 const PB_URL = 'https://jellyfish-app-xml6o.ondigitalocean.app'
 
+// Store env globally for access in helper functions
+let globalEnv: Record<string, string> = {}
+
 // PocketBase admin auth (credentials in wrangler secrets)
 // Note: PocketBase v0.23+ uses _superusers collection, not /api/admins
 async function getPBAdminToken(): Promise<{ token: string | null; error?: string }> {
-  // @ts-ignore - secrets are injected by Cloudflare
-  const email = typeof PB_ADMIN_EMAIL !== 'undefined' ? PB_ADMIN_EMAIL : null
-  // @ts-ignore
-  const password = typeof PB_ADMIN_PASSWORD !== 'undefined' ? PB_ADMIN_PASSWORD : null
+  const email = globalEnv.PB_ADMIN_EMAIL || null
+  const password = globalEnv.PB_ADMIN_PASSWORD || null
 
   if (!email || !password) {
-    return { token: null, error: 'Missing PB_ADMIN_EMAIL or PB_ADMIN_PASSWORD secrets' }
+    return { token: null, error: `Missing PB_ADMIN_EMAIL or PB_ADMIN_PASSWORD secrets (env keys: ${Object.keys(globalEnv).join(', ')})` }
   }
 
   try {
@@ -1096,4 +1097,11 @@ const app = new Elysia({ adapter: CloudflareAdapter })
   // IMPORTANT: compile() is required for CF Workers!
   .compile()
 
-export default app
+// Wrap app to capture env from Cloudflare
+export default {
+  fetch(request: Request, env: Record<string, string>) {
+    // Store env globally for helper functions
+    globalEnv = env
+    return app.fetch(request)
+  }
+}

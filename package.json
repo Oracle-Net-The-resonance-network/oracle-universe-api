@@ -1,6 +1,6 @@
 {
   "name": "oracle-universe-api",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "module": "server.ts",
   "type": "module",
   "private": true,
