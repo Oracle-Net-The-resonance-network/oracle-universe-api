@@ -87,11 +87,12 @@ export const authIdentityRoutes = new Elysia()
         'Oracle'
 
       // 5. Find or create human by wallet
-      const humanSearchRes = await fetch(Humans.byWallet(walletAddress))
-      const humanSearchData = (await humanSearchRes.json()) as { items?: Record<string, unknown>[] }
-
-      // Get admin token for human operations
+      // Get admin token first - needed for search (collection may require auth)
       const adminAuthForHuman = await getPBAdminToken()
+      const humanSearchRes = await fetch(Humans.byWallet(walletAddress), {
+        headers: adminAuthForHuman.token ? { Authorization: adminAuthForHuman.token } : {},
+      })
+      const humanSearchData = (await humanSearchRes.json()) as { items?: Record<string, unknown>[] }
 
       let human: Record<string, unknown>
       if (humanSearchData.items?.length) {
@@ -136,19 +137,22 @@ export const authIdentityRoutes = new Elysia()
       }
 
       // 6. Find or create oracle, link to human
-      const oracleCheckRes = await fetch(Oracles.byBirthIssue(birthIssueUrl))
+      // Use admin auth for search (collection may require auth to read)
+      const oracleCheckRes = await fetch(Oracles.byBirthIssue(birthIssueUrl), {
+        headers: adminAuthForHuman.token ? { Authorization: adminAuthForHuman.token } : {},
+      })
       const oracleCheckData = (await oracleCheckRes.json()) as { items?: Record<string, unknown>[] }
 
       let oracle: Record<string, unknown>
       if (oracleCheckData.items?.length) {
-        // Update existing oracle (requires admin auth)
+        // Update existing oracle (reuse admin auth)
         oracle = oracleCheckData.items[0]
-        const adminAuthForUpdate = await getPBAdminToken()
+        const adminAuthForUpdate = adminAuthForHuman
         if (adminAuthForUpdate.token) {
           const updateOracleRes = await fetch(Oracles.get(oracle.id as string), {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', Authorization: adminAuthForUpdate.token },
-            body: JSON.stringify({ human: human.id, oracle_name: finalOracleName, claimed: true }),
+            body: JSON.stringify({ human: human.id, name: finalOracleName, approved: true }),
           })
           if (updateOracleRes.ok) {
             oracle = (await updateOracleRes.json()) as Record<string, unknown>
@@ -166,11 +170,9 @@ export const authIdentityRoutes = new Elysia()
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: adminAuthForOracle.token },
           body: JSON.stringify({
-            name: githubUsername,
-            oracle_name: finalOracleName,
+            name: finalOracleName,
             birth_issue: birthIssueUrl,
             human: human.id,
-            claimed: true,
             approved: true,
             password: oraclePassword,
             passwordConfirm: oraclePassword,
@@ -200,7 +202,7 @@ export const authIdentityRoutes = new Elysia()
         github_username: githubUsername,
         oracle_name: finalOracleName,
         human: { id: human.id, wallet_address: human.wallet_address, github_username: human.github_username },
-        oracle: { id: oracle.id, name: oracle.name, oracle_name: oracle.oracle_name, birth_issue: oracle.birth_issue },
+        oracle: { id: oracle.id, name: oracle.name, birth_issue: oracle.birth_issue },
       }
     } catch (e: unknown) {
       set.status = 500
