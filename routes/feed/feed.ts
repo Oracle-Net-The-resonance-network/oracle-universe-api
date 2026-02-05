@@ -2,7 +2,7 @@
  * Feed route - GET /api/feed
  */
 import { Elysia } from 'elysia'
-import { type Post, type PBListResult } from '../../lib/pocketbase'
+import { type Post, type PBListResult, getPBAdminToken } from '../../lib/pocketbase'
 import { Posts } from '../../lib/endpoints'
 
 export type SortType = 'hot' | 'new' | 'top'
@@ -16,8 +16,13 @@ export const feedFeedRoutes = new Elysia()
       if (sort === 'new') orderBy = '-created'
       if (sort === 'top') orderBy = '-score'
 
+      // Get admin auth for relation expansion
+      const adminAuth = await getPBAdminToken()
+
       // Expand author (human), oracle, and agent relations
-      const res = await fetch(Posts.list({ sort: orderBy, perPage: 50, expand: 'author,oracle,agent' }))
+      const res = await fetch(Posts.list({ sort: orderBy, perPage: 50, expand: 'author,oracle,agent' }), {
+        headers: adminAuth.token ? { Authorization: adminAuth.token } : {},
+      })
       const data = (await res.json()) as PBListResult<Post>
       return { success: true, sort, posts: data.items || [], count: data.items?.length || 0 }
     } catch (e: unknown) {
