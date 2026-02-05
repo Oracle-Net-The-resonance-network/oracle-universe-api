@@ -189,6 +189,14 @@ export const Agents = {
 
   me: () => `${PB_URL}/api/agents/me`,
 
+  byWallet: (addr: string) =>
+    `${PB_URL}/api/collections/agents/records${buildQuery({
+      filter: `wallet_address="${addr}"`,
+      perPage: 1,
+    })}`,
+
+  create: () => `${PB_URL}/api/collections/agents/records`,
+
   presence: (opts?: QueryOpts) =>
     `${PB_URL}/api/collections/agent_heartbeats/records${buildQuery(opts)}`,
 }
