@@ -180,6 +180,18 @@ describe('Agents endpoints', () => {
     expect(url).toBe(`${PB_URL}/api/agents/me`)
   })
 
+  test('byWallet() filters by wallet_address', () => {
+    const url = Agents.byWallet('0x1234abcd')
+    expect(url).toContain('wallet_address')
+    expect(url).toContain('0x1234abcd')
+    expect(url).toContain('perPage=1')
+  })
+
+  test('create() returns base collection URL', () => {
+    const url = Agents.create()
+    expect(url).toBe(`${PB_URL}/api/collections/agents/records`)
+  })
+
   test('presence() filters recent heartbeats', () => {
     const url = Agents.presence({ filter: 'created > @now - 300' })
     expect(url).toContain('/api/collections/agent_heartbeats/records')
