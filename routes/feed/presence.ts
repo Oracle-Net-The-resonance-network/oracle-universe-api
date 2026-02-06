@@ -9,7 +9,7 @@ export const feedPresenceRoutes = new Elysia()
   // GET /api/presence - Online oracles
   .get('/presence', async () => {
     try {
-      const res = await fetch(Heartbeats.oracles({ filter: 'created > @now - 300', sort: '-created' }))
+      const res = await fetch(Heartbeats.oracles({ filter: 'updated > @now - 300', sort: '-updated' }))
       const data = (await res.json()) as PBListResult<OracleHeartbeat>
       const items = (data.items || []).map(hb => ({
         id: hb.oracle,
