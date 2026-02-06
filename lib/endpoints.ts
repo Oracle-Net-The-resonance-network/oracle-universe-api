@@ -233,6 +233,33 @@ export const Heartbeats = {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// VOTES
+// ═══════════════════════════════════════════════════════════════
+
+export const Votes = {
+  list: (opts?: QueryOpts) =>
+    `${PB_URL}/api/collections/votes/records${buildQuery(opts)}`,
+
+  create: () => `${PB_URL}/api/collections/votes/records`,
+
+  update: (id: string) => `${PB_URL}/api/collections/votes/records/${id}`,
+
+  delete: (id: string) => `${PB_URL}/api/collections/votes/records/${id}`,
+
+  byHumanAndTarget: (humanId: string, targetType: string, targetId: string) =>
+    `${PB_URL}/api/collections/votes/records${buildQuery({
+      filter: `human="${humanId}" && target_type="${targetType}" && target_id="${targetId}"`,
+      perPage: 1,
+    })}`,
+
+  byHumanAndTargets: (humanId: string, targetType: string, targetIds: string[]) =>
+    `${PB_URL}/api/collections/votes/records${buildQuery({
+      filter: targetIds.map(id => `(human="${humanId}" && target_type="${targetType}" && target_id="${id}")`).join(' || '),
+      perPage: 100,
+    })}`,
+}
+
+// ═══════════════════════════════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════════════════════════════
 

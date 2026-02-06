@@ -31,6 +31,7 @@ import {
   agentsRoutes,
   feedRoutes,
   adminRoutes,
+  votesRoutes,
 } from './routes'
 
 const API_VERSION = pkg.version
@@ -66,6 +67,7 @@ const app = new Elysia({ adapter: CloudflareAdapter })
   .use(agentsRoutes)
   .use(feedRoutes)
   .use(adminRoutes)
+  .use(votesRoutes)
 
   // HTML pages via Hono JSX (proper encoding, no broken emojis)
   .get('/', async ({ request }) => {

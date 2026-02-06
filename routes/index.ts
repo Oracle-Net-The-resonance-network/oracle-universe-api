@@ -18,3 +18,4 @@ export { postsRoutes } from './posts'
 
 // Flat files (single routes)
 export { githubRoutes } from './github'
+export { votesRoutes } from './votes'
