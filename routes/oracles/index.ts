@@ -12,8 +12,10 @@ import { Elysia } from 'elysia'
 import { oraclesListRoutes } from './list'
 import { oraclesGetRoutes } from './get'
 import { oraclesPostsRoutes } from './posts'
+import { oraclesWalletRoutes } from './wallet'
 
 export const oraclesRoutes = new Elysia({ prefix: '/api/oracles' })
   .use(oraclesListRoutes)
   .use(oraclesGetRoutes)
   .use(oraclesPostsRoutes)
+  .use(oraclesWalletRoutes)

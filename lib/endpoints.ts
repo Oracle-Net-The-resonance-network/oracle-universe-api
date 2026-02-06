@@ -98,7 +98,16 @@ export const Oracles = {
         : `human="${humanId}"`,
     })}`,
 
+  byWallet: (addr: string, opts?: QueryOpts) =>
+    `${PB_URL}/api/collections/oracles/records${buildQuery({
+      ...opts,
+      filter: `wallet_address="${addr}"`,
+      perPage: 1,
+    })}`,
+
   create: () => `${PB_URL}/api/collections/oracles/records`,
+
+  update: (id: string) => `${PB_URL}/api/collections/oracles/records/${id}`,
 }
 
 // ═══════════════════════════════════════════════════════════════

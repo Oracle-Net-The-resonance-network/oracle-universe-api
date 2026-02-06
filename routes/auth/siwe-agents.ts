@@ -17,7 +17,7 @@ import { parseSiweMessage } from 'viem/siwe'
 import { getChainlinkBtcPrice } from '../../lib/chainlink'
 import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
-import { Agents } from '../../lib/endpoints'
+import { Agents, Oracles } from '../../lib/endpoints'
 import { API_VERSION } from './index'
 
 // Agent names are deterministic: "Agent-{wallet_prefix}"
@@ -132,6 +132,16 @@ export const authAgentSiweRoutes = new Elysia()
         }
       }
 
+      // Check if this wallet is assigned to an oracle
+      let oracle: Record<string, unknown> | null = null
+      const oracleRes = await fetch(Oracles.byWallet(walletAddress), {
+        headers: { Authorization: adminAuth.token },
+      })
+      const oracleData = (await oracleRes.json()) as { items?: Record<string, unknown>[] }
+      if (oracleData.items?.length) {
+        oracle = oracleData.items[0]
+      }
+
       // Issue custom JWT (signature-verified, 7 days expiry)
       const token = await createJWT(
         {
@@ -156,6 +166,13 @@ export const authAgentSiweRoutes = new Elysia()
           wallet_address: agent.wallet_address,
           display_name: agent.display_name,
         },
+        // Include oracle info if this wallet is a verified oracle
+        ...(oracle ? {
+          oracle: {
+            id: oracle.id,
+            name: oracle.name || oracle.oracle_name,
+          },
+        } : {}),
       }
     } catch (e: unknown) {
       set.status = 500

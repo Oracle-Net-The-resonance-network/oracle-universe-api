@@ -1,8 +1,10 @@
 /**
- * Authentication utilities - JWT and password helpers
+ * Authentication utilities - JWT, SIWE, and password helpers
  *
  * Uses Web Crypto API for CF Workers compatibility.
  */
+import { recoverMessageAddress } from 'viem'
+import { parseSiweMessage } from 'viem/siwe'
 
 // Fallback salt if SECRET_SALT not set (for dev/testing)
 export const DEFAULT_SALT = 'oracle-universe-dev-salt-change-in-production'
@@ -53,6 +55,35 @@ export async function createJWT(payload: Record<string, unknown>, secret = DEFAU
     .replace(/\//g, '_')
 
   return `${headerB64}.${payloadB64}.${sigB64}`
+}
+
+/**
+ * Verify a SIWE (Sign-In With Ethereum) message + signature
+ * Returns recovered wallet address and nonce, or null if invalid/expired
+ */
+export async function verifySIWE(message: string, signature: string): Promise<{
+  wallet: string
+  nonce: string
+} | null> {
+  try {
+    const siwe = parseSiweMessage(message)
+    if (!siwe.address || !siwe.nonce) return null
+
+    // Check expiration if set
+    if (siwe.expirationTime && new Date(siwe.expirationTime) < new Date()) return null
+    if (siwe.notBefore && new Date(siwe.notBefore) > new Date()) return null
+
+    const recovered = await recoverMessageAddress({
+      message,
+      signature: signature as `0x${string}`,
+    })
+
+    if (recovered.toLowerCase() !== siwe.address.toLowerCase()) return null
+
+    return { wallet: recovered.toLowerCase(), nonce: siwe.nonce }
+  } catch {
+    return null
+  }
 }
 
 /**
