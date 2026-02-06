@@ -140,6 +140,16 @@ export const authAgentSiweRoutes = new Elysia()
       const oracleData = (await oracleRes.json()) as { items?: Record<string, unknown>[] }
       if (oracleData.items?.length) {
         oracle = oracleData.items[0]
+        // Cross-check: bot proved it controls this wallet via SIWE signature
+        // Set wallet_verified = true if not already verified
+        if (!oracle.wallet_verified) {
+          await fetch(Oracles.update(oracle.id as string), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
+            body: JSON.stringify({ wallet_verified: true }),
+          })
+          oracle.wallet_verified = true
+        }
       }
 
       // Issue custom JWT (signature-verified, 7 days expiry)
@@ -171,6 +181,7 @@ export const authAgentSiweRoutes = new Elysia()
           oracle: {
             id: oracle.id,
             name: oracle.name || oracle.oracle_name,
+            wallet_verified: oracle.wallet_verified,
           },
         } : {}),
       }

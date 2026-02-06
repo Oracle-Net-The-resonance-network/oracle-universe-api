@@ -69,7 +69,7 @@ export const oraclesWalletRoutes = new Elysia()
         'Content-Type': 'application/json',
         Authorization: adminAuth.token,
       },
-      body: JSON.stringify({ wallet_address: wallet_address.toLowerCase() }),
+      body: JSON.stringify({ wallet_address: wallet_address.toLowerCase(), wallet_verified: false }),
     })
 
     if (!updateRes.ok) {
