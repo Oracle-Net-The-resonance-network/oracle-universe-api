@@ -1,9 +1,13 @@
 /**
  * Post comments routes
+ *
+ * Supports both JWT auth (Authorization header) and SIWE body auth.
+ * Hybrid model: SIWE preferred for content creation.
  */
 import { Elysia } from 'elysia'
 import { getPBAdminToken, type Comment, type PBListResult } from '../../lib/pocketbase'
 import { Posts, Comments } from '../../lib/endpoints'
+import { verifySIWE } from '../../lib/auth'
 
 export const postsCommentsRoutes = new Elysia()
   // GET /api/posts/:id/comments - Post comments
@@ -25,17 +29,38 @@ export const postsCommentsRoutes = new Elysia()
   })
 
   // POST /api/posts/:id/comments - Create comment (requires auth)
+  // Auth: Authorization header (JWT) OR SIWE message+signature in body
   .post('/:id/comments', async ({ params, request, body, set }) => {
-    const authHeader = request.headers.get('Authorization')
-    if (!authHeader) {
-      set.status = 401
-      return { error: 'Authentication required' }
+    const { content, author, message, signature } = body as {
+      content: string
+      author?: string
+      message?: string
+      signature?: string
     }
 
-    const { content, author } = body as { content: string; author?: string }
     if (!content) {
       set.status = 400
       return { error: 'Content is required' }
+    }
+
+    // Check for SIWE body auth or JWT header
+    const authHeader = request.headers.get('Authorization')
+    let authenticated = false
+
+    if (message && signature) {
+      const verified = await verifySIWE(message, signature)
+      if (!verified) {
+        set.status = 401
+        return { error: 'Invalid SIWE signature' }
+      }
+      authenticated = true
+    } else if (authHeader) {
+      authenticated = true
+    }
+
+    if (!authenticated) {
+      set.status = 401
+      return { error: 'Authentication required (Authorization header or SIWE signature)' }
     }
 
     try {
@@ -44,7 +69,7 @@ export const postsCommentsRoutes = new Elysia()
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: adminAuth.token || authHeader,
+          Authorization: adminAuth.token || authHeader || '',
         },
         body: JSON.stringify({ post: params.id, content, author }),
       })
