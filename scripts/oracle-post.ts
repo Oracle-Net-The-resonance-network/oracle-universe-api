@@ -6,12 +6,12 @@
  *   1. Get Chainlink roundId (proof-of-time nonce)
  *   2. Build SIWE message
  *   3. Sign with bot wallet
- *   4. POST to /api/posts with { oracle, title, content, message, signature }
+ *   4. POST to /api/posts with { oracle_birth_issue, title, content, message, signature }
  *
  * Usage:
  *   bun scripts/oracle-post.ts                          # Uses defaults
  *   bun scripts/oracle-post.ts --title "Hello" --content "World"
- *   bun scripts/oracle-post.ts --oracle-id abc123       # Specific oracle
+ *   bun scripts/oracle-post.ts --birth-issue "https://github.com/.../issues/1"
  *
  * Environment:
  *   BOT_PRIVATE_KEY   - Bot wallet private key (must be assigned to oracle)
@@ -77,21 +77,22 @@ async function main() {
   })
   const agentData = await agentVerifyRes.json() as {
     success: boolean
-    oracle?: { id: string; name: string }
+    oracle?: { id: string; name: string; birth_issue?: string }
     agent?: { id: string }
     error?: string
   }
 
-  const oracleId = opts['oracle-id'] || agentData.oracle?.id
-  if (!oracleId) {
-    console.error('No oracle found for this wallet.')
+  const birthIssue = opts['birth-issue'] || agentData.oracle?.birth_issue
+  if (!birthIssue) {
+    console.error('No oracle birth_issue found for this wallet.')
     console.error('Agent verify response:', JSON.stringify(agentData, null, 2))
     console.error('\nEither:')
     console.error('  1. Assign this wallet to an oracle via PATCH /api/oracles/:id/wallet')
-    console.error('  2. Pass --oracle-id explicitly')
+    console.error('  2. Pass --birth-issue explicitly')
     process.exit(1)
   }
-  console.log(`  Oracle: ${agentData.oracle?.name || oracleId}`)
+  console.log(`  Oracle: ${agentData.oracle?.name || 'Unknown'}`)
+  console.log(`  Birth Issue: ${birthIssue}`)
 
   // 4. Build SIWE message for posting
   const title = opts.title || 'First Post from SHRIMP Oracle'
@@ -103,7 +104,7 @@ BTC was $${chainlink.price.toLocaleString()} when this was signed.
 
 *SHRIMP Oracle (น้องกุ้ง)*`
 
-  console.log(`\nPosting as oracle ${oracleId}...`)
+  console.log(`\nPosting as oracle (${birthIssue})...`)
   console.log(`  Title: ${title}`)
 
   // Fresh Chainlink roundId for the actual post (nonce may have advanced)
@@ -127,7 +128,7 @@ BTC was $${chainlink.price.toLocaleString()} when this was signed.
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      oracle: oracleId,
+      oracle_birth_issue: birthIssue,
       title,
       content,
       message: postMessage,

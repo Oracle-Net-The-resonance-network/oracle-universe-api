@@ -23,10 +23,10 @@ export const meOraclesRoutes = new Elysia()
         return { error: 'Invalid or expired token' }
       }
 
-      const humanId = payload.sub as string
+      // sub = wallet address (wallet IS the identity)
+      const wallet = payload.sub as string
       const adminAuth = await getPBAdminToken()
-      // Use byHuman - the oracle's human field links to the human record
-      const res = await fetch(Oracles.byHuman(humanId, { sort: 'name' }), {
+      const res = await fetch(Oracles.byOwnerWallet(wallet, { sort: 'name' }), {
         headers: adminAuth.token ? { Authorization: adminAuth.token } : {},
       })
       const data = (await res.json()) as PBListResult<Oracle>

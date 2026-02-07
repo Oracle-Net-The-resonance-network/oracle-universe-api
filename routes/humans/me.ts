@@ -26,21 +26,22 @@ export const humansMeRoutes = new Elysia()
         return { error: 'Invalid or expired token' }
       }
 
-      // Fetch human by ID from token (use admin auth for collection access)
-      const humanId = payload.sub as string
+      // sub = wallet address (wallet IS the identity)
+      const wallet = payload.sub as string
       const adminAuth = await getPBAdminToken()
       const headers: Record<string, string> = {}
       if (adminAuth.token) {
         headers['Authorization'] = adminAuth.token
       }
-      const res = await fetch(Humans.get(humanId), { headers })
+      const res = await fetch(Humans.byWallet(wallet), { headers })
+      const data = (await res.json()) as { items?: Human[] }
 
-      if (!res.ok) {
+      if (!data.items?.length) {
         set.status = 404
         return { error: 'Human not found' }
       }
 
-      const human = (await res.json()) as Human
+      const human = data.items[0]
       return {
         id: human.id,
         wallet_address: human.wallet_address,

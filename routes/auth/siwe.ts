@@ -5,7 +5,7 @@ import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 import { getChainlinkBtcPrice } from '../../lib/chainlink'
-import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../../lib/auth'
+import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
 import { Humans } from '../../lib/endpoints'
 import { API_VERSION } from './index'
@@ -84,9 +84,6 @@ export const authSiweRoutes = new Elysia()
             Authorization: adminAuth.token,
           },
           body: JSON.stringify({
-            email: `${walletAddress}@human.oracle.universe`,
-            password: await hashWalletPassword(walletAddress, DEFAULT_SALT),
-            passwordConfirm: await hashWalletPassword(walletAddress, DEFAULT_SALT),
             wallet_address: walletAddress,
             display_name: `Human-${walletAddress.slice(2, 8)}`,
           }),
@@ -118,10 +115,10 @@ export const authSiweRoutes = new Elysia()
       }
 
       // Issue custom JWT (signature-verified, 7 days expiry)
+      // sub = wallet address (wallet IS the identity)
       const token = await createJWT(
         {
-          sub: human.id,
-          wallet: walletAddress,
+          sub: walletAddress,
           type: 'human',
         },
         DEFAULT_SALT

@@ -14,7 +14,7 @@ export const adminRecordsRoutes = new Elysia()
       set.status = auth.status
       return { error: auth.error, details: auth.details, version: API_VERSION }
     }
-    const token = auth.token
+    const token = auth.token!
 
     const { collection, id } = params
 

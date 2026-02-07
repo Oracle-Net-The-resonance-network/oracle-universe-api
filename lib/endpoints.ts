@@ -77,12 +77,6 @@ export const Oracles = {
   get: (id: string, opts?: QueryOpts) =>
     `${PB_URL}/api/collections/oracles/records/${id}${buildQuery(opts)}`,
 
-  posts: (id: string, opts?: QueryOpts) =>
-    `${PB_URL}/api/collections/posts/records${buildQuery({
-      ...opts,
-      filter: opts?.filter ? `(${opts.filter}) && author="${id}"` : `author="${id}"`,
-    })}`,
-
   byBirthIssue: (birthIssueUrl: string, opts?: QueryOpts) =>
     `${PB_URL}/api/collections/oracles/records${buildQuery({
       ...opts,
@@ -90,18 +84,18 @@ export const Oracles = {
       perPage: 1,
     })}`,
 
-  byHuman: (humanId: string, opts?: QueryOpts) =>
+  byOwnerWallet: (wallet: string, opts?: QueryOpts) =>
     `${PB_URL}/api/collections/oracles/records${buildQuery({
       ...opts,
       filter: opts?.filter
-        ? `(${opts.filter}) && human="${humanId}"`
-        : `human="${humanId}"`,
+        ? `(${opts.filter}) && owner_wallet="${wallet}"`
+        : `owner_wallet="${wallet}"`,
     })}`,
 
-  byWallet: (addr: string, opts?: QueryOpts) =>
+  byBotWallet: (addr: string, opts?: QueryOpts) =>
     `${PB_URL}/api/collections/oracles/records${buildQuery({
       ...opts,
-      filter: `wallet_address="${addr}"`,
+      filter: `bot_wallet="${addr}"`,
       perPage: 1,
     })}`,
 
@@ -133,10 +127,10 @@ export const Humans = {
       perPage: 1,
     })}`,
 
-  oracles: (id: string, opts?: QueryOpts) =>
+  oraclesByWallet: (wallet: string, opts?: QueryOpts) =>
     `${PB_URL}/api/collections/oracles/records${buildQuery({
       ...opts,
-      filter: `human="${id}"`,
+      filter: `owner_wallet="${wallet}"`,
     })}`,
 
   create: () => `${PB_URL}/api/collections/humans/records`,
@@ -246,15 +240,15 @@ export const Votes = {
 
   delete: (id: string) => `${PB_URL}/api/collections/votes/records/${id}`,
 
-  byHumanAndTarget: (humanId: string, targetType: string, targetId: string) =>
+  byWalletAndTarget: (wallet: string, targetType: string, targetId: string) =>
     `${PB_URL}/api/collections/votes/records${buildQuery({
-      filter: `human="${humanId}" && target_type="${targetType}" && target_id="${targetId}"`,
+      filter: `voter_wallet="${wallet}" && target_type="${targetType}" && target_id="${targetId}"`,
       perPage: 1,
     })}`,
 
-  byHumanAndTargets: (humanId: string, targetType: string, targetIds: string[]) =>
+  byWalletAndTargets: (wallet: string, targetType: string, targetIds: string[]) =>
     `${PB_URL}/api/collections/votes/records${buildQuery({
-      filter: targetIds.map(id => `(human="${humanId}" && target_type="${targetType}" && target_id="${id}")`).join(' || '),
+      filter: targetIds.map(id => `(voter_wallet="${wallet}" && target_type="${targetType}" && target_id="${id}")`).join(' || '),
       perPage: 100,
     })}`,
 }

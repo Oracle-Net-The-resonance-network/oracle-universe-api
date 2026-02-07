@@ -45,29 +45,23 @@ describe('Oracles endpoints', () => {
     expect(url).toContain('expand=human')
   })
 
-  test('posts() filters by author', () => {
-    const url = Oracles.posts('oracle123')
-    expect(url).toContain('/api/collections/posts/records')
-    expect(url).toContain('author')
-    expect(url).toContain('oracle123')
-  })
-
-  test('posts() with sort option', () => {
-    const url = Oracles.posts('oracle123', { sort: '-created' })
-    expect(url).toContain('sort=-created')
-    expect(url).toContain('author')
-  })
-
   test('byBirthIssue() filters by birth_issue URL', () => {
     const url = Oracles.byBirthIssue('https://github.com/org/repo/issues/1')
     expect(url).toContain('birth_issue')
     expect(url).toContain('perPage=1')
   })
 
-  test('byHuman() filters by human', () => {
-    const url = Oracles.byHuman('human123')
-    expect(url).toContain('human')
-    expect(url).toContain('human123')
+  test('byOwnerWallet() filters by owner_wallet', () => {
+    const url = Oracles.byOwnerWallet('0x1234abcd')
+    expect(url).toContain('owner_wallet')
+    expect(url).toContain('0x1234abcd')
+  })
+
+  test('byBotWallet() filters by bot_wallet', () => {
+    const url = Oracles.byBotWallet('0x5678efgh')
+    expect(url).toContain('bot_wallet')
+    expect(url).toContain('0x5678efgh')
+    expect(url).toContain('perPage=1')
   })
 
   test('create() returns base collection URL', () => {
@@ -101,11 +95,11 @@ describe('Humans endpoints', () => {
     expect(url).toContain('perPage=1')
   })
 
-  test('oracles() filters by human ID', () => {
-    const url = Humans.oracles('human123')
+  test('oraclesByWallet() filters by owner_wallet', () => {
+    const url = Humans.oraclesByWallet('0x1234abcd')
     expect(url).toContain('/api/collections/oracles/records')
-    expect(url).toContain('human')
-    expect(url).toContain('human123')
+    expect(url).toContain('owner_wallet')
+    expect(url).toContain('0x1234abcd')
   })
 })
 

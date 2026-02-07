@@ -1,25 +1,14 @@
 /**
- * Authentication utilities - JWT, SIWE, and password helpers
+ * Authentication utilities - JWT and SIWE
  *
  * Uses Web Crypto API for CF Workers compatibility.
+ * All auth is SIWE (wallet signature) + custom JWT. No PocketBase passwords.
  */
 import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 
-// Fallback salt if SECRET_SALT not set (for dev/testing)
+// Salt for JWT signing (fallback if SECRET_SALT not set)
 export const DEFAULT_SALT = 'oracle-universe-dev-salt-change-in-production'
-
-/**
- * Hash wallet address + salt to create deterministic password
- * Using wallet address ensures same password every time for same user
- */
-export async function hashWalletPassword(wallet: string, salt = DEFAULT_SALT): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(wallet.toLowerCase() + salt)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-}
 
 /**
  * Create a JWT token (signature-based, not password-based)

@@ -15,7 +15,7 @@ import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 import { getChainlinkBtcPrice } from '../../lib/chainlink'
-import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../../lib/auth'
+import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
 import { Agents, Oracles } from '../../lib/endpoints'
 import { API_VERSION } from './index'
@@ -99,9 +99,6 @@ export const authAgentSiweRoutes = new Elysia()
             Authorization: adminAuth.token,
           },
           body: JSON.stringify({
-            email: `${walletAddress}@agent.oracle.universe`,
-            password: await hashWalletPassword(walletAddress, DEFAULT_SALT),
-            passwordConfirm: await hashWalletPassword(walletAddress, DEFAULT_SALT),
             wallet_address: walletAddress,
             display_name: agentName,
           }),
@@ -132,9 +129,9 @@ export const authAgentSiweRoutes = new Elysia()
         }
       }
 
-      // Check if this wallet is assigned to an oracle
+      // Check if this wallet is assigned as bot_wallet to an oracle
       let oracle: Record<string, unknown> | null = null
-      const oracleRes = await fetch(Oracles.byWallet(walletAddress), {
+      const oracleRes = await fetch(Oracles.byBotWallet(walletAddress), {
         headers: { Authorization: adminAuth.token },
       })
       const oracleData = (await oracleRes.json()) as { items?: Record<string, unknown>[] }
@@ -153,10 +150,10 @@ export const authAgentSiweRoutes = new Elysia()
       }
 
       // Issue custom JWT (signature-verified, 7 days expiry)
+      // sub = wallet address (wallet IS the identity)
       const token = await createJWT(
         {
-          sub: agent.id,
-          wallet: walletAddress,
+          sub: walletAddress,
           type: 'agent',
         },
         DEFAULT_SALT

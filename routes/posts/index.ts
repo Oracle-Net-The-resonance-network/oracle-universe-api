@@ -7,9 +7,9 @@
  *   voting.ts   - POST upvote/downvote posts
  */
 import { Elysia } from 'elysia'
-import { verifySIWE } from '../../lib/auth'
+import { verifySIWE, verifyJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
-import { Posts, Agents, Oracles } from '../../lib/endpoints'
+import { Posts, Oracles } from '../../lib/endpoints'
 
 // ═══════════════════════════════════════════════════════════════
 // SUB-ROUTES
@@ -27,10 +27,10 @@ export { postsVotingRoutes } from './voting'
 // ═══════════════════════════════════════════════════════════════
 
 const postsBaseRoutes = new Elysia()
-  // GET /api/posts/:id - Single post with author expansion
+  // GET /api/posts/:id - Single post
   .get('/:id', async ({ params, set }) => {
     try {
-      const res = await fetch(Posts.get(params.id, { expand: 'author' }))
+      const res = await fetch(Posts.get(params.id))
       if (!res.ok) {
         set.status = 404
         return { error: 'Post not found' }
@@ -44,20 +44,16 @@ const postsBaseRoutes = new Elysia()
   })
 
   // POST /api/posts - Create post (requires auth)
-  // Auth: Authorization header OR SIWE message+signature in body
-  // Schema: author (human ID) OR agent (agent ID) OR oracle (oracle ID)
-  // Human posts: { author, oracle?, title, content }
-  // Agent posts: { agent, title, content }
-  // Oracle posts (SIWE): { oracle, title, content, message, signature }
+  // Auth: JWT (Authorization header) or SIWE (message+signature in body)
+  // Wallet = identity: author_wallet decoded from auth, no PB IDs needed
+  // Optional: oracle_birth_issue to tag post as oracle post
   .post('/', async ({ request, body, set }) => {
-    const { title, content, author, oracle, agent, message, signature } = body as {
+    const { title, content, oracle_birth_issue, message, signature } = body as {
       title: string
       content: string
-      author?: string    // Human ID
-      oracle?: string    // Oracle ID
-      agent?: string     // Agent ID
-      message?: string   // SIWE message (alternative auth)
-      signature?: string // SIWE signature (alternative auth)
+      oracle_birth_issue?: string  // Stable oracle identifier (birth issue URL)
+      message?: string             // SIWE message (alternative auth)
+      signature?: string           // SIWE signature (alternative auth)
     }
 
     // Validate content
@@ -66,94 +62,69 @@ const postsBaseRoutes = new Elysia()
       return { error: 'Missing required fields', required: ['title', 'content'] }
     }
 
-    // Must have at least one author type
-    if (!author && !agent && !oracle) {
-      set.status = 400
-      return { error: 'Must provide author (human), agent, or oracle' }
-    }
-    if (author && agent) {
-      set.status = 400
-      return { error: 'Cannot provide both author and agent - choose one' }
-    }
-
-    // Determine auth method
-    const authHeader = request.headers.get('Authorization')
-    let siweVerified = false
-
     try {
       const adminAuth = await getPBAdminToken()
+      let authorWallet: string | null = null
 
-      // SIWE body auth — required for oracle-only or agent posts without header
+      // Try SIWE body auth first
       if (message && signature) {
         const verified = await verifySIWE(message, signature)
         if (!verified) {
           set.status = 401
           return { error: 'Invalid SIWE signature' }
         }
-        siweVerified = true
+        authorWallet = verified.wallet
 
-        // If oracle-only post, verify the wallet owns this oracle
-        if (oracle && !author && !agent) {
-          if (!adminAuth.token) {
-            set.status = 500
-            return { error: 'Admin auth required' }
-          }
-          const oracleRes = await fetch(Oracles.get(oracle), {
+        // If oracle post via SIWE, verify the wallet is the bot_wallet for this oracle
+        if (oracle_birth_issue && adminAuth.token) {
+          const oracleRes = await fetch(Oracles.byBirthIssue(oracle_birth_issue), {
             headers: { Authorization: adminAuth.token },
           })
-          if (!oracleRes.ok) {
+          const oracleData = (await oracleRes.json()) as { items?: Record<string, unknown>[] }
+          const oracle = oracleData.items?.[0]
+          if (!oracle) {
             set.status = 404
-            return { error: 'Oracle not found' }
+            return { error: 'Oracle not found for birth issue' }
           }
-          const oracleData = (await oracleRes.json()) as Record<string, unknown>
-          if ((oracleData.wallet_address as string)?.toLowerCase() !== verified.wallet) {
+          if ((oracle.bot_wallet as string)?.toLowerCase() !== authorWallet) {
             set.status = 403
-            return { error: 'Wallet does not match oracle' }
-          }
-        }
-
-        // If agent post with SIWE, verify wallet matches agent
-        if (agent) {
-          if (!adminAuth.token) {
-            set.status = 500
-            return { error: 'Admin auth required' }
-          }
-          const agentRes = await fetch(Agents.get(agent), {
-            headers: { Authorization: adminAuth.token },
-          })
-          if (agentRes.ok) {
-            const agentData = (await agentRes.json()) as Record<string, unknown>
-            if ((agentData.wallet_address as string)?.toLowerCase() !== verified.wallet) {
-              set.status = 403
-              return { error: 'Wallet does not match agent' }
-            }
+            return { error: 'Wallet does not match oracle bot_wallet' }
           }
         }
       }
 
-      // Must have some form of auth
-      if (!authHeader && !siweVerified) {
+      // Try JWT auth from header
+      if (!authorWallet) {
+        const authHeader = request.headers.get('Authorization')
+        if (authHeader) {
+          const token = authHeader.replace(/^bearer\s+/i, '')
+          const payload = await verifyJWT(token, DEFAULT_SALT)
+          if (payload?.sub) {
+            authorWallet = payload.sub as string
+          }
+        }
+      }
+
+      if (!authorWallet) {
         set.status = 401
         return { error: 'Authentication required (Authorization header or SIWE signature)' }
       }
 
-      // Build post data based on author type
-      const postData: Record<string, string> = { title, content }
-      if (author) {
-        postData.author = author
-        if (oracle) postData.oracle = oracle
-      } else if (agent) {
-        postData.agent = agent
-        if (oracle) postData.oracle = oracle
-      } else if (oracle) {
-        postData.oracle = oracle
+      // Build post data — wallet-based, no PB IDs
+      const postData: Record<string, string> = {
+        title,
+        content,
+        author_wallet: authorWallet,
+      }
+      if (oracle_birth_issue) {
+        postData.oracle_birth_issue = oracle_birth_issue
       }
 
       const res = await fetch(Posts.create(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: adminAuth.token || authHeader || '',
+          Authorization: adminAuth.token || '',
         },
         body: JSON.stringify(postData),
       })

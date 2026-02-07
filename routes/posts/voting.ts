@@ -1,39 +1,29 @@
 /**
  * Post voting routes - per-user vote tracking via PocketBase votes collection
  *
- * Uses JWT auth to identify the voter (wallet → human lookup).
- * Votes stored in PB `votes` collection with unique constraint per human+target.
+ * Uses JWT auth to identify the voter (sub = wallet address).
+ * Votes stored in PB `votes` collection with unique constraint per wallet+target.
  * Toggle logic: no vote→create, same direction→delete, different→update.
  */
 import { Elysia } from 'elysia'
 import { type Post, getPBAdminToken, type PBListResult } from '../../lib/pocketbase'
-import { Posts, Votes, Humans } from '../../lib/endpoints'
+import { Posts, Votes } from '../../lib/endpoints'
 import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
 
-/** Extract wallet from JWT in Authorization header */
+/** Extract wallet from JWT in Authorization header (sub = wallet) */
 async function getWalletFromAuth(request: Request): Promise<string | null> {
   const authHeader = request.headers.get('Authorization')
   if (!authHeader) return null
   const token = authHeader.replace(/^Bearer\s+/i, '')
   if (!token) return null
   const payload = await verifyJWT(token, DEFAULT_SALT)
-  if (!payload?.wallet) return null
-  return payload.wallet as string
-}
-
-/** Look up human ID by wallet address */
-async function getHumanId(wallet: string, adminToken: string): Promise<string | null> {
-  const res = await fetch(Humans.byWallet(wallet), {
-    headers: { Authorization: adminToken },
-  })
-  if (!res.ok) return null
-  const data = (await res.json()) as PBListResult<{ id: string }>
-  return data.items?.[0]?.id || null
+  if (!payload?.sub) return null
+  return payload.sub as string
 }
 
 interface VoteRecord {
   id: string
-  human: string
+  voter_wallet: string
   target_type: string
   target_id: string
   value: number
@@ -55,11 +45,6 @@ async function handleVote(
     return { status: 500, body: { error: 'Admin auth failed' } }
   }
 
-  const humanId = await getHumanId(wallet, adminAuth.token)
-  if (!humanId) {
-    return { status: 403, body: { error: 'Human not found for this wallet' } }
-  }
-
   // Get current post
   const postRes = await fetch(Posts.get(postId))
   if (!postRes.ok) {
@@ -72,8 +57,8 @@ async function handleVote(
   let downvotes = post.downvotes || 0
   let userVote: 'up' | 'down' | null = null
 
-  // Check existing vote
-  const existingRes = await fetch(Votes.byHumanAndTarget(humanId, 'post', postId), {
+  // Check existing vote (by wallet directly, no human lookup needed)
+  const existingRes = await fetch(Votes.byWalletAndTarget(wallet, 'post', postId), {
     headers: { Authorization: adminAuth.token },
   })
   const existingData = (await existingRes.json()) as PBListResult<VoteRecord>
@@ -84,7 +69,7 @@ async function handleVote(
     await fetch(Votes.create(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-      body: JSON.stringify({ human: humanId, target_type: 'post', target_id: postId, value: newValue }),
+      body: JSON.stringify({ voter_wallet: wallet, target_type: 'post', target_id: postId, value: newValue }),
     })
     if (direction === 'up') upvotes++
     else downvotes++
@@ -157,12 +142,7 @@ export const postsVotingRoutes = new Elysia()
       return { error: 'Admin auth failed' }
     }
 
-    const humanId = await getHumanId(wallet, adminAuth.token)
-    if (!humanId) {
-      return { user_vote: null }
-    }
-
-    const res = await fetch(Votes.byHumanAndTarget(humanId, 'post', params.id), {
+    const res = await fetch(Votes.byWalletAndTarget(wallet, 'post', params.id), {
       headers: { Authorization: adminAuth.token },
     })
     const data = (await res.json()) as PBListResult<VoteRecord>

@@ -39,9 +39,12 @@ export const humansByGithubRoutes = new Elysia()
         return { error: 'Human not found' }
       }
 
-      const humanId = humanData.items[0].id
+      const humanWallet = humanData.items[0].wallet_address
+      if (!humanWallet) {
+        return { resource: 'oracles', github_username: params.username, count: 0, items: [] }
+      }
       const oracleRes = await fetch(
-        Oracles.byHuman(humanId, { filter: 'birth_issue != ""', sort: 'name', expand: 'human' }),
+        Oracles.byOwnerWallet(humanWallet, { filter: 'birth_issue != ""', sort: 'name' }),
         { headers }
       )
       const oracleData = (await oracleRes.json()) as PBListResult<Oracle>

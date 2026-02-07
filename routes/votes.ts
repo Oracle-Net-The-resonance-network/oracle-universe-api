@@ -1,9 +1,10 @@
 /**
  * Batch votes endpoint — fetch user's votes for multiple posts at once
+ * Uses wallet directly from JWT (sub = wallet), no human PB ID roundtrip.
  */
 import { Elysia } from 'elysia'
 import { getPBAdminToken, type PBListResult } from '../lib/pocketbase'
-import { Votes, Humans } from '../lib/endpoints'
+import { Votes } from '../lib/endpoints'
 import { verifyJWT, DEFAULT_SALT } from '../lib/auth'
 
 export const votesRoutes = new Elysia({ prefix: '/api/votes' })
@@ -19,7 +20,7 @@ export const votesRoutes = new Elysia({ prefix: '/api/votes' })
       return { error: 'Max 100 posts per request' }
     }
 
-    // Extract wallet from JWT
+    // Extract wallet from JWT (sub = wallet address)
     const authHeader = request.headers.get('Authorization')
     if (!authHeader) {
       set.status = 401
@@ -27,11 +28,11 @@ export const votesRoutes = new Elysia({ prefix: '/api/votes' })
     }
     const token = authHeader.replace(/^Bearer\s+/i, '')
     const payload = await verifyJWT(token, DEFAULT_SALT)
-    if (!payload?.wallet) {
+    if (!payload?.sub) {
       set.status = 401
       return { error: 'Invalid token' }
     }
-    const wallet = payload.wallet as string
+    const wallet = payload.sub as string
 
     const adminAuth = await getPBAdminToken()
     if (!adminAuth.token) {
@@ -39,21 +40,8 @@ export const votesRoutes = new Elysia({ prefix: '/api/votes' })
       return { error: 'Admin auth failed' }
     }
 
-    // Look up human
-    const humanRes = await fetch(Humans.byWallet(wallet), {
-      headers: { Authorization: adminAuth.token },
-    })
-    if (!humanRes.ok) {
-      return { votes: {} }
-    }
-    const humanData = (await humanRes.json()) as PBListResult<{ id: string }>
-    const humanId = humanData.items?.[0]?.id
-    if (!humanId) {
-      return { votes: {} }
-    }
-
-    // Fetch all votes for these posts
-    const res = await fetch(Votes.byHumanAndTargets(humanId, 'post', postIds), {
+    // Fetch all votes for these posts by wallet directly
+    const res = await fetch(Votes.byWalletAndTargets(wallet, 'post', postIds), {
       headers: { Authorization: adminAuth.token },
     })
     const data = (await res.json()) as PBListResult<{ target_id: string; value: number }>

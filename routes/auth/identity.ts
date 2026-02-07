@@ -2,7 +2,7 @@
  * Oracle Identity verification route (GitHub-based)
  */
 import { Elysia } from 'elysia'
-import { hashWalletPassword, createJWT, DEFAULT_SALT } from '../../lib/auth'
+import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
 import { Humans, Oracles } from '../../lib/endpoints'
 import { getEnv } from '../../lib/env'
@@ -114,15 +114,10 @@ export const authIdentityRoutes = new Elysia()
           set.status = 500
           return { error: 'Admin auth not configured - cannot create human', details: adminAuthForHuman.error, version: API_VERSION }
         }
-        const email = `${walletAddress}@human.oracle.universe`
-        const password = await hashWalletPassword(walletAddress, DEFAULT_SALT)
         const createHumanRes = await fetch(Humans.create(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: adminAuthForHuman.token },
           body: JSON.stringify({
-            email,
-            password,
-            passwordConfirm: password,
             wallet_address: walletAddress,
             github_username: githubUsername,
             display_name: githubUsername,
@@ -136,7 +131,7 @@ export const authIdentityRoutes = new Elysia()
         human = (await createHumanRes.json()) as Record<string, unknown>
       }
 
-      // 6. Find or create oracle, link to human
+      // 6. Find or create oracle, link to human via owner_wallet
       // Use admin auth for search (collection may require auth to read)
       const oracleCheckRes = await fetch(Oracles.byBirthIssue(birthIssueUrl), {
         headers: adminAuthForHuman.token ? { Authorization: adminAuthForHuman.token } : {},
@@ -152,30 +147,27 @@ export const authIdentityRoutes = new Elysia()
           const updateOracleRes = await fetch(Oracles.get(oracle.id as string), {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', Authorization: adminAuthForUpdate.token },
-            body: JSON.stringify({ human: human.id, name: finalOracleName, approved: true }),
+            body: JSON.stringify({ owner_wallet: walletAddress, name: finalOracleName, approved: true }),
           })
           if (updateOracleRes.ok) {
             oracle = (await updateOracleRes.json()) as Record<string, unknown>
           }
         }
       } else {
-        // Create new oracle (requires admin auth since it's an auth collection)
+        // Create new oracle
         const adminAuthForOracle = await getPBAdminToken()
         if (!adminAuthForOracle.token) {
           set.status = 500
           return { error: 'Admin auth not configured - cannot create oracle', details: adminAuthForOracle.error, version: API_VERSION }
         }
-        const oraclePassword = await hashWalletPassword(birthIssueUrl, DEFAULT_SALT)
         const createOracleRes = await fetch(Oracles.create(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: adminAuthForOracle.token },
           body: JSON.stringify({
             name: finalOracleName,
             birth_issue: birthIssueUrl,
-            human: human.id,
+            owner_wallet: walletAddress,
             approved: true,
-            password: oraclePassword,
-            passwordConfirm: oraclePassword,
           }),
         })
         if (!createOracleRes.ok) {
@@ -187,10 +179,10 @@ export const authIdentityRoutes = new Elysia()
       }
 
       // 7. Issue token
+      // sub = wallet address (wallet IS the identity)
       const token = await createJWT(
         {
-          sub: human.id,
-          wallet: walletAddress,
+          sub: walletAddress,
           type: 'human',
         },
         DEFAULT_SALT
