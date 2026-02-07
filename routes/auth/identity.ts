@@ -237,11 +237,11 @@ export const authIdentityRoutes = new Elysia()
 
       return {
         success: true,
-        token, // Custom JWT
+        token, // Custom JWT (sub = wallet address)
         github_username: githubUsername,
         oracle_name: finalOracleName,
-        human: { id: human.id, wallet_address: human.wallet_address, github_username: human.github_username },
-        oracle: { id: oracle.id, name: oracle.name, birth_issue: oracle.birth_issue },
+        human: { wallet: human.wallet_address as string, github_username: human.github_username },
+        oracle: { wallet: (oracle.bot_wallet || '') as string, name: oracle.name, birth_issue: oracle.birth_issue },
       }
     } catch (e: unknown) {
       set.status = 500
