@@ -2,6 +2,8 @@
  * Oracle Identity verification route (GitHub-based)
  */
 import { Elysia } from 'elysia'
+import { recoverMessageAddress } from 'viem'
+import { parseSiweMessage } from 'viem/siwe'
 import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
 import { Humans, Oracles } from '../../lib/endpoints'
@@ -15,10 +17,12 @@ export const authIdentityRoutes = new Elysia()
   // - Wallet in issue body proves wallet ownership (they had to know it)
   // - Birth issue author must match verification issue author
   .post('/verify-identity', async ({ body, set }) => {
-    const { verificationIssueUrl, birthIssueUrl, oracleName } = body as {
+    const { verificationIssueUrl, birthIssueUrl, oracleName, siweMessage, siweSignature } = body as {
       verificationIssueUrl: string
       birthIssueUrl: string
       oracleName?: string
+      siweMessage?: string
+      siweSignature?: string
     }
 
     if (!verificationIssueUrl || !birthIssueUrl) {
@@ -178,7 +182,50 @@ export const authIdentityRoutes = new Elysia()
         oracle = (await createOracleRes.json()) as Record<string, unknown>
       }
 
-      // 7. Issue token
+      // 7. Re-claim: transfer oracles from old wallets — ONLY if SIWE proves wallet ownership
+      let walletVerified = false
+      if (siweMessage && siweSignature) {
+        const parsed = parseSiweMessage(siweMessage)
+        if (parsed.address && parsed.nonce) {
+          const recoveredAddress = await recoverMessageAddress({
+            message: siweMessage,
+            signature: siweSignature as `0x${string}`,
+          })
+          if (recoveredAddress.toLowerCase() === walletAddress) {
+            walletVerified = true
+          }
+        }
+      }
+
+      if (walletVerified && adminAuthForHuman.token && githubUsername) {
+        const allHumansRes = await fetch(
+          Humans.list({ filter: `github_username="${githubUsername}"`, perPage: 200 }),
+          { headers: { Authorization: adminAuthForHuman.token } }
+        )
+        const allHumansData = (await allHumansRes.json()) as { items?: Record<string, unknown>[] }
+        const oldWallets = (allHumansData.items || [])
+          .map((h) => h.wallet_address as string)
+          .filter((w) => w && w !== walletAddress)
+
+        if (oldWallets.length > 0) {
+          const ownerFilter = oldWallets.map((w) => `owner_wallet="${w}"`).join(' || ')
+          const oldOraclesRes = await fetch(
+            Oracles.list({ filter: ownerFilter, perPage: 200 }),
+            { headers: { Authorization: adminAuthForHuman.token } }
+          )
+          const oldOraclesData = (await oldOraclesRes.json()) as { items?: Record<string, unknown>[] }
+
+          for (const o of oldOraclesData.items || []) {
+            await fetch(Oracles.update(o.id as string), {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: adminAuthForHuman.token },
+              body: JSON.stringify({ owner_wallet: walletAddress }),
+            })
+          }
+        }
+      }
+
+      // 8. Issue token
       // sub = wallet address (wallet IS the identity)
       const token = await createJWT(
         {
