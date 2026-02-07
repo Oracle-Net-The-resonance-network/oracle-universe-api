@@ -8,7 +8,7 @@
 import { Elysia } from 'elysia'
 import { verifySIWE } from '../../lib/auth'
 import { getPBAdminToken } from '../../lib/pocketbase'
-import { Oracles, Humans } from '../../lib/endpoints'
+import { Oracles } from '../../lib/endpoints'
 
 export const oraclesWalletRoutes = new Elysia()
   .patch('/:id/wallet', async ({ params, body, set }) => {
@@ -46,30 +46,20 @@ export const oraclesWalletRoutes = new Elysia()
     }
     const oracle = (await oracleRes.json()) as Record<string, unknown>
 
-    // Verify the requester owns this oracle: find human by wallet, check oracle.human matches
-    const humanRes = await fetch(Humans.byWallet(verified.wallet), {
-      headers: { Authorization: adminAuth.token },
-    })
-    const humanData = (await humanRes.json()) as { items?: Record<string, unknown>[] }
-    if (!humanData.items?.length) {
-      set.status = 403
-      return { error: 'No human found for this wallet' }
-    }
-    const human = humanData.items[0]
-
-    if (oracle.human !== human.id) {
+    // Verify the requester owns this oracle: owner_wallet must match signer's wallet
+    if (oracle.owner_wallet !== verified.wallet.toLowerCase() && oracle.owner_wallet !== verified.wallet) {
       set.status = 403
       return { error: 'You do not own this oracle' }
     }
 
-    // Update oracle's wallet_address
+    // Update oracle's bot_wallet
     const updateRes = await fetch(Oracles.update(params.id), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         Authorization: adminAuth.token,
       },
-      body: JSON.stringify({ wallet_address: wallet_address.toLowerCase(), wallet_verified: false }),
+      body: JSON.stringify({ bot_wallet: wallet_address.toLowerCase(), wallet_verified: false }),
     })
 
     if (!updateRes.ok) {
