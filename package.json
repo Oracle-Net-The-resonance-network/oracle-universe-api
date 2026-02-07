@@ -10,7 +10,8 @@
     "test": "bun test",
     "test:prod": "API_URL=https://oracle-universe-api.laris.workers.dev bun test",
     "cf:dev": "wrangler dev worker.ts",
-    "cf:deploy": "wrangler deploy worker.ts"
+    "cf:deploy": "wrangler deploy worker.ts",
+    "test:e2e": "bun scripts/test-reclaim.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
