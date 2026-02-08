@@ -5,10 +5,9 @@ import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 import { createJWT, DEFAULT_SALT } from '../../lib/auth'
-import { getPBAdminToken } from '../../lib/pocketbase'
-import { Humans, Oracles } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { HumanRecord, OracleRecord } from '../../lib/pb-types'
 import { getEnv } from '../../lib/env'
-import { API_VERSION } from './index'
 
 export const authIdentityRoutes = new Elysia()
   // Verify Oracle Identity (GitHub-based, stateless)
@@ -82,6 +81,26 @@ export const authIdentityRoutes = new Elysia()
       const walletAddress = walletMatch[0].toLowerCase()
       const githubUsername = verifyIssue.user?.login
 
+      // Extract optional bot wallet from issue body
+      // Supports: "Bot Wallet: 0x..." label OR "bot_wallet": "0x..." in JSON
+      const botWalletMatch = issueBody.match(/Bot Wallet:\s*(0x[a-fA-F0-9]{40})/i)
+        || issueBody.match(/"bot_wallet":\s*"(0x[a-fA-F0-9]{40})"/i)
+      const botWallet = botWalletMatch?.[1]?.toLowerCase()
+
+      const pb = await getAdminPB()
+
+      // Reject duplicate bot_wallet — each oracle must have its own bot wallet
+      if (botWallet) {
+        const dupData = await pb.collection('oracles').getList<OracleRecord>(1, 10, {
+          filter: `bot_wallet="${botWallet}"`,
+        })
+        const existingOracle = dupData.items?.find(o => o.birth_issue !== birthIssueUrl)
+        if (existingOracle) {
+          set.status = 400
+          return { error: 'Bot wallet already assigned to another oracle', debug: { bot_wallet: botWallet, existing_oracle: existingOracle.name } }
+        }
+      }
+
       const finalOracleName =
         oracleName ||
         birthIssue.title
@@ -91,95 +110,49 @@ export const authIdentityRoutes = new Elysia()
         'Oracle'
 
       // 5. Find or create human by wallet
-      // Get admin token first - needed for search (collection may require auth)
-      const adminAuthForHuman = await getPBAdminToken()
-      const humanSearchRes = await fetch(Humans.byWallet(walletAddress), {
-        headers: adminAuthForHuman.token ? { Authorization: adminAuthForHuman.token } : {},
+      const humanSearchData = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+        filter: `wallet_address="${walletAddress}"`,
       })
-      const humanSearchData = (await humanSearchRes.json()) as { items?: Record<string, unknown>[] }
 
       let human: Record<string, unknown>
       if (humanSearchData.items?.length) {
         // Update existing human with GitHub username
-        human = humanSearchData.items[0]
-        if (adminAuthForHuman.token) {
-          const updateHumanRes = await fetch(Humans.get(human.id as string), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', Authorization: adminAuthForHuman.token },
-            body: JSON.stringify({ github_username: githubUsername, display_name: githubUsername }),
-          })
-          if (updateHumanRes.ok) {
-            human = (await updateHumanRes.json()) as Record<string, unknown>
-          }
-        }
+        human = await pb.collection('humans').update(humanSearchData.items[0].id, {
+          github_username: githubUsername,
+          display_name: githubUsername,
+        })
       } else {
         // Create new human
-        if (!adminAuthForHuman.token) {
-          set.status = 500
-          return { error: 'Admin auth not configured - cannot create human', details: adminAuthForHuman.error, version: API_VERSION }
-        }
-        const createHumanRes = await fetch(Humans.create(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: adminAuthForHuman.token },
-          body: JSON.stringify({
-            wallet_address: walletAddress,
-            github_username: githubUsername,
-            display_name: githubUsername,
-          }),
+        human = await pb.collection('humans').create({
+          wallet_address: walletAddress,
+          github_username: githubUsername,
+          display_name: githubUsername,
         })
-        if (!createHumanRes.ok) {
-          const err = await createHumanRes.text()
-          set.status = 500
-          return { error: 'Failed to create human', details: err, version: API_VERSION }
-        }
-        human = (await createHumanRes.json()) as Record<string, unknown>
       }
 
       // 6. Find or create oracle, link to human via owner_wallet
-      // Use admin auth for search (collection may require auth to read)
-      const oracleCheckRes = await fetch(Oracles.byBirthIssue(birthIssueUrl), {
-        headers: adminAuthForHuman.token ? { Authorization: adminAuthForHuman.token } : {},
+      const oracleCheckData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+        filter: `birth_issue="${birthIssueUrl}"`,
       })
-      const oracleCheckData = (await oracleCheckRes.json()) as { items?: Record<string, unknown>[] }
 
       let oracle: Record<string, unknown>
       if (oracleCheckData.items?.length) {
-        // Update existing oracle (reuse admin auth)
-        oracle = oracleCheckData.items[0]
-        const adminAuthForUpdate = adminAuthForHuman
-        if (adminAuthForUpdate.token) {
-          const updateOracleRes = await fetch(Oracles.get(oracle.id as string), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', Authorization: adminAuthForUpdate.token },
-            body: JSON.stringify({ owner_wallet: walletAddress, name: finalOracleName, approved: true }),
-          })
-          if (updateOracleRes.ok) {
-            oracle = (await updateOracleRes.json()) as Record<string, unknown>
-          }
-        }
+        // Update existing oracle
+        oracle = await pb.collection('oracles').update(oracleCheckData.items[0].id, {
+          owner_wallet: walletAddress,
+          name: finalOracleName,
+          approved: true,
+          ...(botWallet && { bot_wallet: botWallet, wallet_verified: false }),
+        })
       } else {
         // Create new oracle
-        const adminAuthForOracle = await getPBAdminToken()
-        if (!adminAuthForOracle.token) {
-          set.status = 500
-          return { error: 'Admin auth not configured - cannot create oracle', details: adminAuthForOracle.error, version: API_VERSION }
-        }
-        const createOracleRes = await fetch(Oracles.create(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: adminAuthForOracle.token },
-          body: JSON.stringify({
-            name: finalOracleName,
-            birth_issue: birthIssueUrl,
-            owner_wallet: walletAddress,
-            approved: true,
-          }),
+        oracle = await pb.collection('oracles').create({
+          name: finalOracleName,
+          birth_issue: birthIssueUrl,
+          owner_wallet: walletAddress,
+          approved: true,
+          ...(botWallet && { bot_wallet: botWallet, wallet_verified: false }),
         })
-        if (!createOracleRes.ok) {
-          const err = await createOracleRes.text()
-          set.status = 500
-          return { error: 'Failed to create oracle', details: err }
-        }
-        oracle = (await createOracleRes.json()) as Record<string, unknown>
       }
 
       // 7. Re-claim: transfer oracles from old wallets — ONLY if SIWE proves wallet ownership
@@ -197,30 +170,22 @@ export const authIdentityRoutes = new Elysia()
         }
       }
 
-      if (walletVerified && adminAuthForHuman.token && githubUsername) {
-        const allHumansRes = await fetch(
-          Humans.list({ filter: `github_username="${githubUsername}"`, perPage: 200 }),
-          { headers: { Authorization: adminAuthForHuman.token } }
-        )
-        const allHumansData = (await allHumansRes.json()) as { items?: Record<string, unknown>[] }
+      if (walletVerified && githubUsername) {
+        const allHumansData = await pb.collection('humans').getList<HumanRecord>(1, 200, {
+          filter: `github_username="${githubUsername}"`,
+        })
         const oldWallets = (allHumansData.items || [])
-          .map((h) => h.wallet_address as string)
+          .map((h) => h.wallet_address)
           .filter((w) => w && w !== walletAddress)
 
         if (oldWallets.length > 0) {
           const ownerFilter = oldWallets.map((w) => `owner_wallet="${w}"`).join(' || ')
-          const oldOraclesRes = await fetch(
-            Oracles.list({ filter: ownerFilter, perPage: 200 }),
-            { headers: { Authorization: adminAuthForHuman.token } }
-          )
-          const oldOraclesData = (await oldOraclesRes.json()) as { items?: Record<string, unknown>[] }
+          const oldOraclesData = await pb.collection('oracles').getList<OracleRecord>(1, 200, {
+            filter: ownerFilter,
+          })
 
           for (const o of oldOraclesData.items || []) {
-            await fetch(Oracles.update(o.id as string), {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', Authorization: adminAuthForHuman.token },
-              body: JSON.stringify({ owner_wallet: walletAddress }),
-            })
+            await pb.collection('oracles').update(o.id, { owner_wallet: walletAddress })
           }
         }
       }

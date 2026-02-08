@@ -7,7 +7,7 @@
  *   records.ts - DELETE /:collection/:id - delete specific record
  */
 import { Elysia } from 'elysia'
-import { getPBAdminToken } from '../../lib/pocketbase'
+import { getAdminPB } from '../../lib/pb'
 import pkg from '../../package.json'
 
 // ═══════════════════════════════════════════════════════════════
@@ -17,21 +17,21 @@ import pkg from '../../package.json'
 export const API_VERSION = pkg.version
 
 type AdminAuthResult =
-  | { error: null; token: string; status?: never; details?: never }
-  | { error: string; token?: never; status: number; details?: string }
+  | { error: null; status?: never; details?: never }
+  | { error: string; status: number; details?: string }
 
 /**
  * Verify admin authorization
- * Returns token if authorized, error if not
+ * Returns success if authorized, error if not
  */
 export async function requireAdmin(authHeader: string | null): Promise<AdminAuthResult> {
-  const adminAuth = await getPBAdminToken()
-
-  if (!adminAuth.token) {
+  try {
+    await getAdminPB()
+  } catch (e: unknown) {
     return {
       error: 'Admin credentials not configured',
       status: 500,
-      details: adminAuth.error,
+      details: e instanceof Error ? e.message : String(e),
     }
   }
 
@@ -42,7 +42,7 @@ export async function requireAdmin(authHeader: string | null): Promise<AdminAuth
     }
   }
 
-  return { error: null, token: adminAuth.token }
+  return { error: null }
 }
 
 // ═══════════════════════════════════════════════════════════════

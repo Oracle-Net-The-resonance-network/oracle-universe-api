@@ -2,15 +2,17 @@
  * Human by-github routes - GET /api/humans/by-github/*
  */
 import { Elysia } from 'elysia'
-import { getPBAdminToken, type Human, type Oracle, type PBListResult } from '../../lib/pocketbase'
-import { Humans, Oracles } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { HumanRecord, OracleRecord } from '../../lib/pb-types'
 
 export const humansByGithubRoutes = new Elysia()
   // GET /api/humans/by-github/:username - Find human by GitHub username
   .get('/by-github/:username', async ({ params, set }) => {
     try {
-      const res = await fetch(Humans.byGithub(params.username))
-      const data = (await res.json()) as PBListResult<Human>
+      const pb = await getAdminPB()
+      const data = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+        filter: `github_username="${params.username}"`,
+      })
       if (!data.items || data.items.length === 0) {
         set.status = 404
         return { error: 'Human not found' }
@@ -26,13 +28,12 @@ export const humansByGithubRoutes = new Elysia()
   // GET /api/humans/by-github/:username/oracles - Get oracles by GitHub username (public)
   .get('/by-github/:username/oracles', async ({ params, set }) => {
     try {
-      const adminAuth = await getPBAdminToken()
-      const headers: Record<string, string> = {}
-      if (adminAuth.token) headers['Authorization'] = adminAuth.token
+      const pb = await getAdminPB()
 
       // First find the human
-      const humanRes = await fetch(Humans.byGithub(params.username), { headers })
-      const humanData = (await humanRes.json()) as PBListResult<Human>
+      const humanData = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+        filter: `github_username="${params.username}"`,
+      })
 
       if (!humanData.items?.length) {
         set.status = 404
@@ -43,11 +44,11 @@ export const humansByGithubRoutes = new Elysia()
       if (!humanWallet) {
         return { resource: 'oracles', github_username: params.username, count: 0, items: [] }
       }
-      const oracleRes = await fetch(
-        Oracles.byOwnerWallet(humanWallet, { filter: 'birth_issue != ""', sort: 'name' }),
-        { headers }
-      )
-      const oracleData = (await oracleRes.json()) as PBListResult<Oracle>
+
+      const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 100, {
+        filter: `owner_wallet="${humanWallet}" && birth_issue != ""`,
+        sort: 'name',
+      })
 
       return {
         resource: 'oracles',

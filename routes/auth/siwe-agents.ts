@@ -16,8 +16,8 @@ import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 import { getChainlinkBtcPrice } from '../../lib/chainlink'
 import { createJWT, DEFAULT_SALT } from '../../lib/auth'
-import { getPBAdminToken } from '../../lib/pocketbase'
-import { Agents, Oracles } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { AgentRecord, OracleRecord } from '../../lib/pb-types'
 import { API_VERSION } from './index'
 
 // Agent names are deterministic: "Agent-{wallet_prefix}"
@@ -71,80 +71,58 @@ export const authAgentSiweRoutes = new Elysia()
       const agentName = `Agent-${walletAddress.slice(2, 8)}`
 
       // Signature verified! Now find or create agent record
-      let agent: Record<string, unknown>
+      let agent: AgentRecord
       let created = false
 
-      // Get admin token for all PocketBase operations
-      const adminAuth = await getPBAdminToken()
-      if (!adminAuth.token) {
-        set.status = 500
-        return { error: 'Admin auth required', details: adminAuth.error, version: API_VERSION }
-      }
+      const pb = await getAdminPB()
 
       // Look up existing agent by wallet
-      const searchRes = await fetch(Agents.byWallet(walletAddress), {
-        headers: { Authorization: adminAuth.token },
+      const searchData = await pb.collection('agents').getList<AgentRecord>(1, 1, {
+        filter: `wallet_address="${walletAddress}"`,
       })
-      const searchData = (await searchRes.json()) as { items?: Record<string, unknown>[] }
 
       if (searchData.items?.length) {
         // Existing agent found
         agent = searchData.items[0]
       } else {
         // Create new agent
-        const createRes = await fetch(Agents.create(), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: adminAuth.token,
-          },
-          body: JSON.stringify({
+        try {
+          agent = await pb.collection('agents').create<AgentRecord>({
             wallet_address: walletAddress,
             display_name: agentName,
-          }),
-        })
-
-        if (!createRes.ok) {
-          const errorText = await createRes.text()
+          })
+          created = true
+        } catch (createErr: any) {
           // If creation failed due to unique constraint, fetch existing agent
-          if (errorText.includes('validation_not_unique')) {
-            // Race condition - try fetching again
-            const retryRes = await fetch(Agents.byWallet(walletAddress), {
-              headers: { Authorization: adminAuth.token },
+          if (createErr?.data?.data?.wallet_address?.code === 'validation_not_unique' ||
+              String(createErr).includes('validation_not_unique')) {
+            const retryData = await pb.collection('agents').getList<AgentRecord>(1, 1, {
+              filter: `wallet_address="${walletAddress}"`,
             })
-            const retryData = (await retryRes.json()) as { items?: Record<string, unknown>[] }
             if (retryData.items?.length) {
               agent = retryData.items[0]
             } else {
               set.status = 500
-              return { error: 'Failed to find or create agent', details: errorText, version: API_VERSION }
+              return { error: 'Failed to find or create agent', version: API_VERSION }
             }
           } else {
             set.status = 500
-            return { error: 'Failed to create agent', details: errorText, version: API_VERSION }
+            return { error: 'Failed to create agent', details: String(createErr), version: API_VERSION }
           }
-        } else {
-          agent = (await createRes.json()) as Record<string, unknown>
-          created = true
         }
       }
 
       // Check if this wallet is assigned as bot_wallet to an oracle
-      let oracle: Record<string, unknown> | null = null
-      const oracleRes = await fetch(Oracles.byBotWallet(walletAddress), {
-        headers: { Authorization: adminAuth.token },
+      let oracle: OracleRecord | null = null
+      const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+        filter: `bot_wallet="${walletAddress}"`,
       })
-      const oracleData = (await oracleRes.json()) as { items?: Record<string, unknown>[] }
       if (oracleData.items?.length) {
         oracle = oracleData.items[0]
         // Cross-check: bot proved it controls this wallet via SIWE signature
         // Set wallet_verified = true if not already verified
         if (!oracle.wallet_verified) {
-          await fetch(Oracles.update(oracle.id as string), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-            body: JSON.stringify({ wallet_verified: true }),
-          })
+          await pb.collection('oracles').update(oracle.id, { wallet_verified: true })
           oracle.wallet_verified = true
         }
       }

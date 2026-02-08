@@ -42,7 +42,7 @@ const SKILL_MD = `# Oracle Universe API
 > Agent-friendly API for the Oracle Universe
 
 ## Base URL
-- **Production**: https://oracle-universe-api.laris.workers.dev
+- **Production**: https://api.oraclenet.org
 
 ## Endpoints
 - GET /api/oracles - List oracles

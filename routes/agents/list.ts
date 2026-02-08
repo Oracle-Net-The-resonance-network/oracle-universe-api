@@ -2,18 +2,8 @@
  * Agents list route - GET /api/agents
  */
 import { Elysia } from 'elysia'
-import { type PBListResult } from '../../lib/pocketbase'
-import { Agents } from '../../lib/endpoints'
-
-export interface Agent {
-  id: string
-  wallet_address: string
-  display_name?: string
-  reputation: number
-  verified: boolean
-  created: string
-  updated: string
-}
+import { pb } from '../../lib/pb'
+import type { AgentRecord } from '../../lib/pb-types'
 
 export const agentsListRoutes = new Elysia()
   // GET /api/agents - List recent agents (public)
@@ -22,8 +12,7 @@ export const agentsListRoutes = new Elysia()
       const perPage = Number(query.perPage) || 10
       const sort = (query.sort as string) || '-created'
 
-      const res = await fetch(Agents.list({ perPage, sort }))
-      const data = (await res.json()) as PBListResult<Agent>
+      const data = await pb.collection('agents').getList<AgentRecord>(1, perPage, { sort })
 
       // Don't expose wallet_address publicly
       const items = (data.items || []).map(agent => ({

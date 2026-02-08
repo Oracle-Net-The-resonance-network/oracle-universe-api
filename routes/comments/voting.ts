@@ -2,8 +2,8 @@
  * Comment voting routes - upvote/downvote comments
  */
 import { Elysia } from 'elysia'
-import { type Comment } from '../../lib/pocketbase'
-import { Comments } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { CommentRecord } from '../../lib/pb-types'
 
 export const commentsVotingRoutes = new Elysia()
   // POST /api/comments/:id/upvote
@@ -14,26 +14,18 @@ export const commentsVotingRoutes = new Elysia()
       return { error: 'Authentication required' }
     }
     try {
-      const getRes = await fetch(Comments.get(params.id))
-      if (!getRes.ok) {
-        set.status = 404
-        return { error: 'Comment not found' }
-      }
-      const comment = (await getRes.json()) as Comment
+      const pb = await getAdminPB()
+      const comment = await pb.collection('comments').getOne<CommentRecord>(params.id)
       const newUpvotes = (comment.upvotes || 0) + 1
       const newScore = newUpvotes - (comment.downvotes || 0)
 
-      const updateRes = await fetch(Comments.update(params.id), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ upvotes: newUpvotes, score: newScore }),
-      })
-      if (!updateRes.ok) {
-        set.status = 403
-        return { error: 'Failed to upvote' }
-      }
+      await pb.collection('comments').update(params.id, { upvotes: newUpvotes, score: newScore })
       return { success: true, message: 'Upvoted', upvotes: newUpvotes, downvotes: comment.downvotes || 0, score: newScore }
-    } catch (e: unknown) {
+    } catch (e: any) {
+      if (e?.status === 404) {
+        set.status = 404
+        return { error: 'Comment not found' }
+      }
       set.status = 500
       const message = e instanceof Error ? e.message : String(e)
       return { error: message }
@@ -48,26 +40,18 @@ export const commentsVotingRoutes = new Elysia()
       return { error: 'Authentication required' }
     }
     try {
-      const getRes = await fetch(Comments.get(params.id))
-      if (!getRes.ok) {
-        set.status = 404
-        return { error: 'Comment not found' }
-      }
-      const comment = (await getRes.json()) as Comment
+      const pb = await getAdminPB()
+      const comment = await pb.collection('comments').getOne<CommentRecord>(params.id)
       const newDownvotes = (comment.downvotes || 0) + 1
       const newScore = (comment.upvotes || 0) - newDownvotes
 
-      const updateRes = await fetch(Comments.update(params.id), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ downvotes: newDownvotes, score: newScore }),
-      })
-      if (!updateRes.ok) {
-        set.status = 403
-        return { error: 'Failed to downvote' }
-      }
+      await pb.collection('comments').update(params.id, { downvotes: newDownvotes, score: newScore })
       return { success: true, message: 'Downvoted', upvotes: comment.upvotes || 0, downvotes: newDownvotes, score: newScore }
-    } catch (e: unknown) {
+    } catch (e: any) {
+      if (e?.status === 404) {
+        set.status = 404
+        return { error: 'Comment not found' }
+      }
       set.status = 500
       const message = e instanceof Error ? e.message : String(e)
       return { error: message }

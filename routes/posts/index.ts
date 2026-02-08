@@ -8,8 +8,8 @@
  */
 import { Elysia } from 'elysia'
 import { verifySIWE, verifyJWT, DEFAULT_SALT } from '../../lib/auth'
-import { getPBAdminToken } from '../../lib/pocketbase'
-import { Posts, Oracles } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { OracleRecord } from '../../lib/pb-types'
 
 // ═══════════════════════════════════════════════════════════════
 // SUB-ROUTES
@@ -30,13 +30,13 @@ const postsBaseRoutes = new Elysia()
   // GET /api/posts/:id - Single post
   .get('/:id', async ({ params, set }) => {
     try {
-      const res = await fetch(Posts.get(params.id))
-      if (!res.ok) {
+      const pb = await getAdminPB()
+      return await pb.collection('posts').getOne(params.id)
+    } catch (e: any) {
+      if (e?.status === 404) {
         set.status = 404
         return { error: 'Post not found' }
       }
-      return await res.json()
-    } catch (e: unknown) {
       set.status = 500
       const message = e instanceof Error ? e.message : String(e)
       return { error: message }
@@ -63,7 +63,7 @@ const postsBaseRoutes = new Elysia()
     }
 
     try {
-      const adminAuth = await getPBAdminToken()
+      const pb = await getAdminPB()
       let authorWallet: string | null = null
 
       // Try SIWE body auth first
@@ -76,17 +76,16 @@ const postsBaseRoutes = new Elysia()
         authorWallet = verified.wallet
 
         // If oracle post via SIWE, verify the wallet is the bot_wallet for this oracle
-        if (oracle_birth_issue && adminAuth.token) {
-          const oracleRes = await fetch(Oracles.byBirthIssue(oracle_birth_issue), {
-            headers: { Authorization: adminAuth.token },
+        if (oracle_birth_issue) {
+          const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+            filter: `birth_issue="${oracle_birth_issue}"`,
           })
-          const oracleData = (await oracleRes.json()) as { items?: Record<string, unknown>[] }
           const oracle = oracleData.items?.[0]
           if (!oracle) {
             set.status = 404
             return { error: 'Oracle not found for birth issue' }
           }
-          if ((oracle.bot_wallet as string)?.toLowerCase() !== authorWallet) {
+          if (oracle.bot_wallet?.toLowerCase() !== authorWallet) {
             set.status = 403
             return { error: 'Wallet does not match oracle bot_wallet' }
           }
@@ -101,6 +100,23 @@ const postsBaseRoutes = new Elysia()
           const payload = await verifyJWT(token, DEFAULT_SALT)
           if (payload?.sub) {
             authorWallet = payload.sub as string
+
+            // If oracle post via JWT, verify the wallet owns this oracle
+            if (oracle_birth_issue) {
+              const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+                filter: `birth_issue="${oracle_birth_issue}"`,
+              })
+              const oracle = oracleData.items?.[0]
+              if (!oracle) {
+                set.status = 404
+                return { error: 'Oracle not found for birth issue' }
+              }
+              if (oracle.owner_wallet?.toLowerCase() !== authorWallet &&
+                  oracle.bot_wallet?.toLowerCase() !== authorWallet) {
+                set.status = 403
+                return { error: 'You do not own this oracle' }
+              }
+            }
           }
         }
       }
@@ -120,21 +136,7 @@ const postsBaseRoutes = new Elysia()
         postData.oracle_birth_issue = oracle_birth_issue
       }
 
-      const res = await fetch(Posts.create(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: adminAuth.token || '',
-        },
-        body: JSON.stringify(postData),
-      })
-
-      if (!res.ok) {
-        set.status = res.status
-        const err = await res.text()
-        return { error: 'Failed to create post', details: err }
-      }
-      return await res.json()
+      return await pb.collection('posts').create(postData)
     } catch (e: unknown) {
       set.status = 500
       const message = e instanceof Error ? e.message : String(e)

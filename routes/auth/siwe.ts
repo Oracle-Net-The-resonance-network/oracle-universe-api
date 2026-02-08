@@ -6,8 +6,8 @@ import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
 import { getChainlinkBtcPrice } from '../../lib/chainlink'
 import { createJWT, DEFAULT_SALT } from '../../lib/auth'
-import { getPBAdminToken } from '../../lib/pocketbase'
-import { Humans } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { HumanRecord } from '../../lib/pb-types'
 import { API_VERSION } from './index'
 
 export const authSiweRoutes = new Elysia()
@@ -56,61 +56,44 @@ export const authSiweRoutes = new Elysia()
       const walletAddress = recoveredAddress.toLowerCase()
 
       // Signature verified! Now find or create human record
-      let human: Record<string, unknown>
+      let human: HumanRecord
       let created = false
 
-      // Get admin token for all PocketBase operations
-      const adminAuth = await getPBAdminToken()
-      if (!adminAuth.token) {
-        set.status = 500
-        return { error: 'Admin auth required', details: adminAuth.error, version: API_VERSION }
-      }
+      const pb = await getAdminPB()
 
-      // Look up existing user by wallet (use admin auth for reliable access)
-      const searchRes = await fetch(Humans.byWallet(walletAddress), {
-        headers: { Authorization: adminAuth.token },
+      // Look up existing user by wallet
+      const searchData = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+        filter: `wallet_address="${walletAddress}"`,
       })
-      const searchData = (await searchRes.json()) as { items?: Record<string, unknown>[] }
 
       if (searchData.items?.length) {
         // Existing user - use their record
         human = searchData.items[0]
       } else {
         // Create new user
-        const createRes = await fetch(Humans.create(), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: adminAuth.token,
-          },
-          body: JSON.stringify({
+        try {
+          human = await pb.collection('humans').create<HumanRecord>({
             wallet_address: walletAddress,
             display_name: `Human-${walletAddress.slice(2, 8)}`,
-          }),
-        })
-
-        if (!createRes.ok) {
-          const errorText = await createRes.text()
+          })
+          created = true
+        } catch (createErr: any) {
           // If creation failed due to unique constraint, fetch existing user
-          if (errorText.includes('validation_not_unique')) {
-            // Race condition or case mismatch - try fetching again
-            const retryRes = await fetch(Humans.byWallet(walletAddress), {
-              headers: { Authorization: adminAuth.token },
+          if (createErr?.data?.data?.wallet_address?.code === 'validation_not_unique' ||
+              String(createErr).includes('validation_not_unique')) {
+            const retryData = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+              filter: `wallet_address="${walletAddress}"`,
             })
-            const retryData = (await retryRes.json()) as { items?: Record<string, unknown>[] }
             if (retryData.items?.length) {
               human = retryData.items[0]
             } else {
               set.status = 500
-              return { error: 'Failed to find or create human', details: errorText, version: API_VERSION }
+              return { error: 'Failed to find or create human', version: API_VERSION }
             }
           } else {
             set.status = 500
-            return { error: 'Failed to create human', details: errorText, version: API_VERSION }
+            return { error: 'Failed to create human', details: String(createErr), version: API_VERSION }
           }
-        } else {
-          human = (await createRes.json()) as Record<string, unknown>
-          created = true
         }
       }
 

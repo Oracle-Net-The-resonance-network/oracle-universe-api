@@ -5,16 +5,19 @@
  * Wallet = identity: author_wallet decoded from auth, no PB IDs needed.
  */
 import { Elysia } from 'elysia'
-import { getPBAdminToken, type Comment, type PBListResult } from '../../lib/pocketbase'
-import { Posts, Comments } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { CommentRecord } from '../../lib/pb-types'
 import { verifySIWE, verifyJWT, DEFAULT_SALT } from '../../lib/auth'
 
 export const postsCommentsRoutes = new Elysia()
   // GET /api/posts/:id/comments - Post comments
   .get('/:id/comments', async ({ params, set }) => {
     try {
-      const res = await fetch(Posts.comments(params.id, { sort: '-created' }))
-      const data = (await res.json()) as PBListResult<Comment>
+      const pb = await getAdminPB()
+      const data = await pb.collection('comments').getList<CommentRecord>(1, 50, {
+        filter: `post="${params.id}"`,
+        sort: '-created',
+      })
       return {
         resource: 'comments',
         postId: params.id,
@@ -72,22 +75,12 @@ export const postsCommentsRoutes = new Elysia()
     }
 
     try {
-      const adminAuth = await getPBAdminToken()
-      const res = await fetch(Comments.create(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: adminAuth.token || '',
-        },
-        body: JSON.stringify({ post: params.id, content, author_wallet: authorWallet }),
+      const pb = await getAdminPB()
+      return await pb.collection('comments').create({
+        post: params.id,
+        content,
+        author_wallet: authorWallet,
       })
-
-      if (!res.ok) {
-        set.status = res.status
-        const err = await res.text()
-        return { error: 'Failed to create comment', details: err }
-      }
-      return await res.json()
     } catch (e: unknown) {
       set.status = 500
       const message = e instanceof Error ? e.message : String(e)

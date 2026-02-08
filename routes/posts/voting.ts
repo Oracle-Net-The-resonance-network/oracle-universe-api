@@ -3,11 +3,11 @@
  *
  * Uses JWT auth to identify the voter (sub = wallet address).
  * Votes stored in PB `votes` collection with unique constraint per wallet+target.
- * Toggle logic: no vote→create, same direction→delete, different→update.
+ * Toggle logic: no vote->create, same direction->delete, different->update.
  */
 import { Elysia } from 'elysia'
-import { type Post, getPBAdminToken, type PBListResult } from '../../lib/pocketbase'
-import { Posts, Votes } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { PostRecord, VoteRecord } from '../../lib/pb-types'
 import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
 
 /** Extract wallet from JWT in Authorization header (sub = wallet) */
@@ -21,14 +21,6 @@ async function getWalletFromAuth(request: Request): Promise<string | null> {
   return payload.sub as string
 }
 
-interface VoteRecord {
-  id: string
-  voter_wallet: string
-  target_type: string
-  target_id: string
-  value: number
-}
-
 /** Core vote logic — shared by new and legacy endpoints */
 async function handleVote(
   postId: string,
@@ -40,17 +32,15 @@ async function handleVote(
     return { status: 401, body: { error: 'Valid JWT required' } }
   }
 
-  const adminAuth = await getPBAdminToken()
-  if (!adminAuth.token) {
-    return { status: 500, body: { error: 'Admin auth failed' } }
-  }
+  const pb = await getAdminPB()
 
   // Get current post
-  const postRes = await fetch(Posts.get(postId))
-  if (!postRes.ok) {
+  let post: PostRecord
+  try {
+    post = await pb.collection('posts').getOne<PostRecord>(postId)
+  } catch {
     return { status: 404, body: { error: 'Post not found' } }
   }
-  const post = (await postRes.json()) as Post
 
   const newValue = direction === 'up' ? 1 : -1
   let upvotes = post.upvotes || 0
@@ -58,38 +48,31 @@ async function handleVote(
   let userVote: 'up' | 'down' | null = null
 
   // Check existing vote (by wallet directly, no human lookup needed)
-  const existingRes = await fetch(Votes.byWalletAndTarget(wallet, 'post', postId), {
-    headers: { Authorization: adminAuth.token },
+  const existingData = await pb.collection('votes').getList<VoteRecord>(1, 1, {
+    filter: `voter_wallet="${wallet}" && target_type="post" && target_id="${postId}"`,
   })
-  const existingData = (await existingRes.json()) as PBListResult<VoteRecord>
   const existing = existingData.items?.[0]
 
   if (!existing) {
-    // No existing vote → create
-    await fetch(Votes.create(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-      body: JSON.stringify({ voter_wallet: wallet, target_type: 'post', target_id: postId, value: newValue }),
+    // No existing vote -> create
+    await pb.collection('votes').create({
+      voter_wallet: wallet,
+      target_type: 'post',
+      target_id: postId,
+      value: newValue,
     })
     if (direction === 'up') upvotes++
     else downvotes++
     userVote = direction
   } else if (existing.value === newValue) {
-    // Same direction → toggle off (delete)
-    await fetch(Votes.delete(existing.id), {
-      method: 'DELETE',
-      headers: { Authorization: adminAuth.token },
-    })
+    // Same direction -> toggle off (delete)
+    await pb.collection('votes').delete(existing.id)
     if (direction === 'up') upvotes = Math.max(0, upvotes - 1)
     else downvotes = Math.max(0, downvotes - 1)
     userVote = null
   } else {
-    // Different direction → switch
-    await fetch(Votes.update(existing.id), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-      body: JSON.stringify({ value: newValue }),
-    })
+    // Different direction -> switch
+    await pb.collection('votes').update(existing.id, { value: newValue })
     if (direction === 'up') {
       upvotes++
       downvotes = Math.max(0, downvotes - 1)
@@ -103,11 +86,7 @@ async function handleVote(
   const score = upvotes - downvotes
 
   // Update post counts
-  await fetch(Posts.update(postId), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-    body: JSON.stringify({ upvotes, downvotes, score }),
-  })
+  await pb.collection('posts').update(postId, { upvotes, downvotes, score })
 
   return {
     status: 200,
@@ -136,16 +115,10 @@ export const postsVotingRoutes = new Elysia()
       return { error: 'Valid JWT required' }
     }
 
-    const adminAuth = await getPBAdminToken()
-    if (!adminAuth.token) {
-      set.status = 500
-      return { error: 'Admin auth failed' }
-    }
-
-    const res = await fetch(Votes.byWalletAndTarget(wallet, 'post', params.id), {
-      headers: { Authorization: adminAuth.token },
+    const pb = await getAdminPB()
+    const data = await pb.collection('votes').getList<VoteRecord>(1, 1, {
+      filter: `voter_wallet="${wallet}" && target_type="post" && target_id="${params.id}"`,
     })
-    const data = (await res.json()) as PBListResult<VoteRecord>
     const vote = data.items?.[0]
 
     return { user_vote: vote ? (vote.value === 1 ? 'up' : 'down') : null }

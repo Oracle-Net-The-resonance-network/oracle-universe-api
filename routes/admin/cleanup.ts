@@ -3,7 +3,8 @@
  */
 import { Elysia } from 'elysia'
 import { requireAdmin, API_VERSION } from './index'
-import { Oracles, Humans } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { OracleRecord, HumanRecord } from '../../lib/pb-types'
 
 export const adminCleanupRoutes = new Elysia()
   .delete('/cleanup', async ({ request, set }) => {
@@ -12,40 +13,33 @@ export const adminCleanupRoutes = new Elysia()
       set.status = auth.status
       return { error: auth.error, details: auth.details, version: API_VERSION }
     }
-    const token = auth.token!
 
     const deleted: string[] = []
 
     try {
+      const pb = await getAdminPB()
+
       // Delete orphan oracles (no birth_issue)
-      const oraclesRes = await fetch(Oracles.list({ perPage: 100 }))
-      const oraclesData = (await oraclesRes.json()) as {
-        items?: { id: string; birth_issue?: string }[]
-      }
+      const oraclesData = await pb.collection('oracles').getList<OracleRecord>(1, 100)
 
       for (const oracle of oraclesData.items || []) {
         if (!oracle.birth_issue) {
-          const delRes = await fetch(Oracles.get(oracle.id), {
-            method: 'DELETE',
-            headers: { Authorization: token },
-          })
-          if (delRes.ok) deleted.push(`oracle:${oracle.id}`)
+          try {
+            await pb.collection('oracles').delete(oracle.id)
+            deleted.push(`oracle:${oracle.id}`)
+          } catch { /* skip failures */ }
         }
       }
 
       // Delete orphan humans (no wallet_address)
-      const humansRes = await fetch(Humans.list({ perPage: 100 }))
-      const humansData = (await humansRes.json()) as {
-        items?: { id: string; wallet_address?: string }[]
-      }
+      const humansData = await pb.collection('humans').getList<HumanRecord>(1, 100)
 
       for (const human of humansData.items || []) {
         if (!human.wallet_address) {
-          const delRes = await fetch(Humans.get(human.id), {
-            method: 'DELETE',
-            headers: { Authorization: token },
-          })
-          if (delRes.ok) deleted.push(`human:${human.id}`)
+          try {
+            await pb.collection('humans').delete(human.id)
+            deleted.push(`human:${human.id}`)
+          } catch { /* skip failures */ }
         }
       }
 

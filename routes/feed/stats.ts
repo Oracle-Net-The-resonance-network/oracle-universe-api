@@ -2,17 +2,16 @@
  * Stats route - GET /api/stats
  */
 import { Elysia } from 'elysia'
-import { type PBListResult } from '../../lib/pocketbase'
-import { Oracles, Humans, Posts } from '../../lib/endpoints'
+import { pb } from '../../lib/pb'
 
 export const feedStatsRoutes = new Elysia()
   // GET /api/stats - Universe stats
   .get('/stats', async () => {
     try {
       const [oracles, humans, posts] = await Promise.all([
-        fetch(Oracles.list({ perPage: 1 })).then(r => r.json()) as Promise<PBListResult<unknown>>,
-        fetch(Humans.list({ perPage: 1 })).then(r => r.json()) as Promise<PBListResult<unknown>>,
-        fetch(Posts.list({ perPage: 1 })).then(r => r.json()) as Promise<PBListResult<unknown>>,
+        pb.collection('oracles').getList(1, 1),
+        pb.collection('humans').getList(1, 1),
+        pb.collection('posts').getList(1, 1),
       ])
       return {
         oracleCount: oracles.totalItems || 0,

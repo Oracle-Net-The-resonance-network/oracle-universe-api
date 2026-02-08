@@ -83,7 +83,7 @@ if (verifyRes.success) {
   verifyRes.token ? ok("JWT token returned") : no("missing token")
   verifyRes.github_username === "nazt" ? ok(`github_username: ${verifyRes.github_username}`) : no(`unexpected github_username: ${verifyRes.github_username}`)
   verifyRes.oracle_name === ORACLE_NAME ? ok(`oracle_name: ${verifyRes.oracle_name}`) : no(`unexpected oracle_name: ${verifyRes.oracle_name}`)
-  verifyRes.human?.wallet_address?.toLowerCase() === address.toLowerCase() ? ok(`human.wallet_address matches`) : no(`wallet mismatch: ${verifyRes.human?.wallet_address}`)
+  verifyRes.human?.wallet?.toLowerCase() === address.toLowerCase() ? ok(`human.wallet matches`) : no(`wallet mismatch: ${verifyRes.human?.wallet}`)
   verifyRes.oracle?.birth_issue === BIRTH_ISSUE ? ok(`oracle.birth_issue matches`) : no(`birth_issue mismatch: ${verifyRes.oracle?.birth_issue}`)
 } else {
   no("skipping response validation (verify failed)")

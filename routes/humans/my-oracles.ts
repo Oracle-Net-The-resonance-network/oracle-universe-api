@@ -3,8 +3,8 @@
  */
 import { Elysia } from 'elysia'
 import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
-import { getPBAdminToken, type Oracle, type PBListResult } from '../../lib/pocketbase'
-import { Oracles } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { OracleRecord } from '../../lib/pb-types'
 
 export const meOraclesRoutes = new Elysia()
   // GET /api/me/oracles - Authenticated human's oracles
@@ -25,11 +25,11 @@ export const meOraclesRoutes = new Elysia()
 
       // sub = wallet address (wallet IS the identity)
       const wallet = payload.sub as string
-      const adminAuth = await getPBAdminToken()
-      const res = await fetch(Oracles.byOwnerWallet(wallet, { sort: 'name' }), {
-        headers: adminAuth.token ? { Authorization: adminAuth.token } : {},
+      const pb = await getAdminPB()
+      const data = await pb.collection('oracles').getList<OracleRecord>(1, 100, {
+        filter: `owner_wallet="${wallet}"`,
+        sort: 'name',
       })
-      const data = (await res.json()) as PBListResult<Oracle>
       return { resource: 'oracles', count: data.items?.length || 0, items: data.items || [] }
     } catch (e: unknown) {
       set.status = 500

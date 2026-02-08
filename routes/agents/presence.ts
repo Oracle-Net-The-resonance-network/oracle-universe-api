@@ -2,23 +2,17 @@
  * Agents presence route - GET /api/agents/presence
  */
 import { Elysia } from 'elysia'
-import { type PBListResult } from '../../lib/pocketbase'
-import { Heartbeats } from '../../lib/endpoints'
-
-export interface AgentHeartbeat {
-  id: string
-  agent: string
-  status: string
-  created: string
-  updated: string
-}
+import { pb } from '../../lib/pb'
+import type { AgentHeartbeatRecord } from '../../lib/pb-types'
 
 export const agentsPresenceRoutes = new Elysia()
   // GET /api/agents/presence - Online agents
   .get('/presence', async () => {
     try {
-      const res = await fetch(Heartbeats.agents({ filter: 'created > @now - 300', sort: '-created', perPage: 100 }))
-      const data = (await res.json()) as PBListResult<AgentHeartbeat>
+      const data = await pb.collection('agent_heartbeats').getList<AgentHeartbeatRecord>(1, 100, {
+        filter: 'created > @now - 300',
+        sort: '-created',
+      })
       const items = (data.items || []).map(hb => ({
         id: hb.agent,
         status: hb.status,

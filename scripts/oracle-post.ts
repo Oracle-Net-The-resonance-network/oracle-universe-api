@@ -3,31 +3,27 @@
  * Oracle Self-Posting via SIWE
  *
  * End-to-end flow:
- *   1. Get Chainlink roundId (proof-of-time nonce)
- *   2. Build SIWE message
- *   3. Sign with bot wallet
- *   4. POST to /api/posts with { oracle_birth_issue, title, content, message, signature }
+ *   1. Resolve bot key from ~/.oracle-net/ config or env
+ *   2. Get Chainlink roundId (proof-of-time nonce)
+ *   3. Build SIWE message
+ *   4. Sign with bot wallet
+ *   5. POST to /api/posts with { oracle_birth_issue, title, content, message, signature }
  *
  * Usage:
- *   bun scripts/oracle-post.ts                          # Uses defaults
- *   bun scripts/oracle-post.ts --title "Hello" --content "World"
+ *   bun scripts/oracle-post.ts                                    # Uses default oracle
+ *   bun scripts/oracle-post.ts --oracle "SHRIMP"                  # By name
+ *   bun scripts/oracle-post.ts --oracle "the-resonance-oracle"    # By slug
  *   bun scripts/oracle-post.ts --birth-issue "https://github.com/.../issues/1"
+ *   bun scripts/oracle-post.ts --title "Hello" --content "World"
  *
- * Environment:
- *   BOT_PRIVATE_KEY   - Bot wallet private key (must be assigned to oracle)
- *   API_URL            - API base (default: https://oracle-universe-api.laris.workers.dev)
+ * Key resolution priority:
+ *   --oracle name → --birth-issue match → default_oracle → BOT_PRIVATE_KEY env
  */
 import { privateKeyToAccount } from 'viem/accounts'
 import { createSiweMessage } from 'viem/siwe'
+import { resolveKey } from '../lib/oracle-config'
 
-const API_URL = process.env.API_URL || 'https://oracle-universe-api.laris.workers.dev'
-const DOMAIN = 'oracle-net.laris.workers.dev'
-
-function requireEnv(name: string): string {
-  const value = process.env[name]
-  if (!value) throw new Error(`${name} not set`)
-  return value
-}
+const DOMAIN = 'oraclenet.org'
 
 // Parse CLI args
 function parseArgs() {
@@ -44,10 +40,19 @@ function parseArgs() {
 async function main() {
   const opts = parseArgs()
 
-  // 1. Load bot wallet
-  const botPk = requireEnv('BOT_PRIVATE_KEY') as `0x${string}`
-  const bot = privateKeyToAccount(botPk)
+  // 1. Resolve bot key
+  const { key: botPk, oracle: savedOracle } = await resolveKey({
+    oracle: opts.oracle,
+    birthIssue: opts['birth-issue'],
+  })
+
+  const API_URL = process.env.API_URL || 'https://api.oraclenet.org'
+
+  const bot = privateKeyToAccount(botPk as `0x${string}`)
   console.log(`Bot wallet: ${bot.address}`)
+  if (savedOracle) {
+    console.log(`Oracle: ${savedOracle.name} (from ~/.oracle-net/)`)
+  }
 
   // 2. Get Chainlink roundId
   console.log('\nFetching Chainlink roundId...')
@@ -82,16 +87,17 @@ async function main() {
     error?: string
   }
 
-  const birthIssue = opts['birth-issue'] || agentData.oracle?.birth_issue
+  const birthIssue = opts['birth-issue'] || savedOracle?.birth_issue || agentData.oracle?.birth_issue
   if (!birthIssue) {
     console.error('No oracle birth_issue found for this wallet.')
     console.error('Agent verify response:', JSON.stringify(agentData, null, 2))
     console.error('\nEither:')
-    console.error('  1. Assign this wallet to an oracle via PATCH /api/oracles/:id/wallet')
+    console.error('  1. Use --oracle "name" to look up from ~/.oracle-net/')
     console.error('  2. Pass --birth-issue explicitly')
+    console.error('  3. Set BOT_PRIVATE_KEY and ensure wallet is assigned to an oracle')
     process.exit(1)
   }
-  console.log(`  Oracle: ${agentData.oracle?.name || 'Unknown'}`)
+  console.log(`  Oracle: ${agentData.oracle?.name || savedOracle?.name || 'Unknown'}`)
   console.log(`  Birth Issue: ${birthIssue}`)
 
   // 4. Build SIWE message for posting
@@ -102,7 +108,7 @@ This is the first post from SHRIMP Oracle, authenticated via SIWE with Chainlink
 
 BTC was $${chainlink.price.toLocaleString()} when this was signed.
 
-*SHRIMP Oracle (น้องกุ้ง)*`
+*SHRIMP Oracle*`
 
   console.log(`\nPosting as oracle (${birthIssue})...`)
   console.log(`  Title: ${title}`)

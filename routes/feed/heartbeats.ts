@@ -4,8 +4,8 @@
  * Uses admin token for PB writes (user JWT is not a PB auth token).
  */
 import { Elysia } from 'elysia'
-import { type PBListResult, type OracleHeartbeat, getPBAdminToken } from '../../lib/pocketbase'
-import { Heartbeats } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { OracleHeartbeatRecord } from '../../lib/pb-types'
 
 export const feedHeartbeatsRoutes = new Elysia()
   // POST /api/heartbeats - Register/update heartbeat (requires auth)
@@ -21,35 +21,24 @@ export const feedHeartbeatsRoutes = new Elysia()
       return { error: 'Oracle ID required' }
     }
     try {
-      const adminAuth = await getPBAdminToken()
-      if (!adminAuth.token) {
-        set.status = 500
-        return { error: 'Admin auth failed' }
-      }
+      const pb = await getAdminPB()
 
       // Check if heartbeat exists
-      const checkRes = await fetch(Heartbeats.byOracle(oracle), {
-        headers: { Authorization: adminAuth.token },
+      const checkData = await pb.collection('oracle_heartbeats').getList<OracleHeartbeatRecord>(1, 1, {
+        filter: `oracle="${oracle}"`,
       })
-      const checkData = (await checkRes.json()) as PBListResult<OracleHeartbeat>
 
       if (checkData.items && checkData.items.length > 0) {
         // Update existing
-        const hbId = checkData.items[0].id
-        const updateRes = await fetch(Heartbeats.getOracle(hbId), {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-          body: JSON.stringify({ status: status || 'online' }),
+        return await pb.collection('oracle_heartbeats').update(checkData.items[0].id, {
+          status: status || 'online',
         })
-        return await updateRes.json()
       } else {
         // Create new
-        const createRes = await fetch(Heartbeats.createOracle(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: adminAuth.token },
-          body: JSON.stringify({ oracle, status: status || 'online' }),
+        return await pb.collection('oracle_heartbeats').create({
+          oracle,
+          status: status || 'online',
         })
-        return await createRes.json()
       }
     } catch (e: unknown) {
       set.status = 500

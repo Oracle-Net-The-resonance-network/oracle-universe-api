@@ -3,8 +3,8 @@
  */
 import { Elysia } from 'elysia'
 import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
-import { getPBAdminToken, type Human } from '../../lib/pocketbase'
-import { Humans } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { HumanRecord } from '../../lib/pb-types'
 
 export const humansMeRoutes = new Elysia()
   // GET /api/humans/me - Current human (requires custom JWT auth)
@@ -28,13 +28,10 @@ export const humansMeRoutes = new Elysia()
 
       // sub = wallet address (wallet IS the identity)
       const wallet = payload.sub as string
-      const adminAuth = await getPBAdminToken()
-      const headers: Record<string, string> = {}
-      if (adminAuth.token) {
-        headers['Authorization'] = adminAuth.token
-      }
-      const res = await fetch(Humans.byWallet(wallet), { headers })
-      const data = (await res.json()) as { items?: Human[] }
+      const pb = await getAdminPB()
+      const data = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+        filter: `wallet_address="${wallet}"`,
+      })
 
       if (!data.items?.length) {
         set.status = 404

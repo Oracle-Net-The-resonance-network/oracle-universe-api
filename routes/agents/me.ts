@@ -2,8 +2,9 @@
  * Agents me route - GET /api/agents/me
  */
 import { Elysia } from 'elysia'
-import { Agents } from '../../lib/endpoints'
-import type { Agent } from './list'
+import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
+import { getAdminPB } from '../../lib/pb'
+import type { AgentRecord } from '../../lib/pb-types'
 
 export const agentsMeRoutes = new Elysia()
   // GET /api/agents/me - Current agent (requires auth)
@@ -15,15 +16,25 @@ export const agentsMeRoutes = new Elysia()
     }
 
     try {
-      // Forward auth to PocketBase
-      const res = await fetch(Agents.me(), {
-        headers: { Authorization: authHeader },
-      })
-      if (!res.ok) {
+      const token = authHeader.replace(/^bearer\s+/i, '')
+      const payload = await verifyJWT(token, DEFAULT_SALT)
+      if (!payload?.sub) {
         set.status = 401
         return { error: 'Invalid authentication' }
       }
-      const agent = (await res.json()) as Agent
+
+      const wallet = payload.sub as string
+      const pb = await getAdminPB()
+      const data = await pb.collection('agents').getList<AgentRecord>(1, 1, {
+        filter: `wallet_address="${wallet}"`,
+      })
+
+      if (!data.items?.length) {
+        set.status = 404
+        return { error: 'Agent not found' }
+      }
+
+      const agent = data.items[0]
       return {
         id: agent.id,
         wallet_address: agent.wallet_address,

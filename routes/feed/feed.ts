@@ -6,22 +6,10 @@
  * Frontend resolves display info from wallet.
  */
 import { Elysia } from 'elysia'
-import { type PBListResult, getPBAdminToken } from '../../lib/pocketbase'
-import { Posts, Humans, Agents, Oracles } from '../../lib/endpoints'
+import { getAdminPB } from '../../lib/pb'
+import type { PostRecord, HumanRecord, AgentRecord, OracleRecord } from '../../lib/pb-types'
 
 export type SortType = 'hot' | 'new' | 'top'
-
-interface RawPost {
-  id: string
-  title: string
-  content: string
-  author_wallet: string
-  oracle_birth_issue?: string
-  upvotes: number
-  downvotes: number
-  score: number
-  created: string
-}
 
 export const feedFeedRoutes = new Elysia()
   // GET /api/feed - Posts feed (sorted)
@@ -32,22 +20,20 @@ export const feedFeedRoutes = new Elysia()
       if (sort === 'new') orderBy = '-created'
       if (sort === 'top') orderBy = '-score'
 
-      const adminAuth = await getPBAdminToken()
-      const headers: Record<string, string> = adminAuth.token ? { Authorization: adminAuth.token } : {}
+      const pb = await getAdminPB()
 
-      const res = await fetch(Posts.list({ sort: orderBy, perPage: 50 }), { headers })
-      const data = (await res.json()) as PBListResult<RawPost>
+      const data = await pb.collection('posts').getList<PostRecord>(1, 50, { sort: orderBy })
       const posts = data.items || []
 
       // Collect unique wallets and birth issues for batch resolution
       const wallets = [...new Set(posts.map(p => p.author_wallet).filter(Boolean))]
-      const birthIssues = [...new Set(posts.map(p => p.oracle_birth_issue).filter(Boolean))]
+      const birthIssues = [...new Set(posts.map(p => p.oracle_birth_issue).filter(Boolean))] as string[]
 
       // Batch-fetch humans, agents, and oracles for display info
       const [humansMap, agentsMap, oraclesMap] = await Promise.all([
-        resolveHumans(wallets, headers),
-        resolveAgents(wallets, headers),
-        resolveOracles(birthIssues as string[], headers),
+        resolveHumans(pb, wallets),
+        resolveAgents(pb, wallets),
+        resolveOracles(pb, birthIssues),
       ])
 
       // Enrich posts with display info
@@ -119,38 +105,37 @@ export const feedFeedRoutes = new Elysia()
 
 // Batch resolve helpers — fetch all matching records in one call
 
-async function resolveHumans(wallets: string[], headers: Record<string, string>) {
-  const map = new Map<string, Record<string, unknown>>()
+import type PocketBase from 'pocketbase'
+
+async function resolveHumans(pb: PocketBase, wallets: string[]) {
+  const map = new Map<string, HumanRecord>()
   if (wallets.length === 0) return map
   const filter = wallets.map(w => `wallet_address="${w}"`).join(' || ')
-  const res = await fetch(Humans.list({ filter, perPage: 200 }), { headers })
-  const data = (await res.json()) as PBListResult<Record<string, unknown>>
+  const data = await pb.collection('humans').getList<HumanRecord>(1, 200, { filter })
   for (const h of data.items || []) {
-    map.set((h.wallet_address as string) || '', h)
+    map.set(h.wallet_address || '', h)
   }
   return map
 }
 
-async function resolveAgents(wallets: string[], headers: Record<string, string>) {
-  const map = new Map<string, Record<string, unknown>>()
+async function resolveAgents(pb: PocketBase, wallets: string[]) {
+  const map = new Map<string, AgentRecord>()
   if (wallets.length === 0) return map
   const filter = wallets.map(w => `wallet_address="${w}"`).join(' || ')
-  const res = await fetch(Agents.list({ filter, perPage: 200 }), { headers })
-  const data = (await res.json()) as PBListResult<Record<string, unknown>>
+  const data = await pb.collection('agents').getList<AgentRecord>(1, 200, { filter })
   for (const a of data.items || []) {
-    map.set((a.wallet_address as string) || '', a)
+    map.set(a.wallet_address || '', a)
   }
   return map
 }
 
-async function resolveOracles(birthIssues: string[], headers: Record<string, string>) {
-  const map = new Map<string, Record<string, unknown>>()
+async function resolveOracles(pb: PocketBase, birthIssues: string[]) {
+  const map = new Map<string, OracleRecord>()
   if (birthIssues.length === 0) return map
   const filter = birthIssues.map(b => `birth_issue="${b}"`).join(' || ')
-  const res = await fetch(Oracles.list({ filter, perPage: 200 }), { headers })
-  const data = (await res.json()) as PBListResult<Record<string, unknown>>
+  const data = await pb.collection('oracles').getList<OracleRecord>(1, 200, { filter })
   for (const o of data.items || []) {
-    map.set((o.birth_issue as string) || '', o)
+    map.set(o.birth_issue || '', o)
   }
   return map
 }

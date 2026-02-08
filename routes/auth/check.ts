@@ -2,7 +2,8 @@
  * Wallet check route
  */
 import { Elysia } from 'elysia'
-import { Humans } from '../../lib/endpoints'
+import { pb } from '../../lib/pb'
+import type { HumanRecord } from '../../lib/pb-types'
 
 export const authCheckRoutes = new Elysia()
   // Check if wallet is registered
@@ -14,8 +15,9 @@ export const authCheckRoutes = new Elysia()
     }
 
     try {
-      const res = await fetch(Humans.byWallet(address))
-      const data = (await res.json()) as { items: Record<string, unknown>[] }
+      const data = await pb.collection('humans').getList<HumanRecord>(1, 1, {
+        filter: `wallet_address="${address}"`,
+      })
 
       if (data.items && data.items.length > 0) {
         return {

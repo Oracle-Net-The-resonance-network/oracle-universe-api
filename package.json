@@ -25,6 +25,7 @@
     "@elysiajs/static": "^1.4.7",
     "elysia": "^1.4.22",
     "hono": "^4.11.7",
+    "pocketbase": "^0.26.8",
     "viem": "^2.45.1"
   }
 }
