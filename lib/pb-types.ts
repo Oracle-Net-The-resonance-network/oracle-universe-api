@@ -14,6 +14,7 @@ export interface OracleRecord extends RecordModel {
   owner_wallet?: string
   bot_wallet?: string
   wallet_verified?: boolean
+  verification_issue?: string
   approved: boolean
   claimed: boolean
   karma: number
