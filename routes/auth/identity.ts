@@ -8,6 +8,7 @@ import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getAdminPB } from '../../lib/pb'
 import type { HumanRecord, OracleRecord } from '../../lib/pb-types'
 import { getEnv } from '../../lib/env'
+import { getChainlinkRoundData } from '../../lib/chainlink'
 
 export const authIdentityRoutes = new Elysia()
   // Verify Oracle Identity (GitHub-based, stateless)
@@ -116,6 +117,22 @@ export const authIdentityRoutes = new Elysia()
           set.status = 400
           const message = e instanceof Error ? e.message : String(e)
           return { error: 'Invalid signature in verification issue', details: message }
+        }
+      }
+
+      // 3c. Verify chainlink_round freshness (proof-of-time) — REQUIRED
+      // Fetch the claimed round's timestamp from the contract — must be within 1 hour
+      if (!bodyData.chainlink_round) {
+        set.status = 400
+        return { error: 'Missing chainlink_round in verification payload (required for proof-of-time)' }
+      }
+      {
+        const roundData = await getChainlinkRoundData(bodyData.chainlink_round)
+        const nowSec = Math.floor(Date.now() / 1000)
+        const ageSec = nowSec - roundData.timestamp
+        if (ageSec > 3600) {
+          set.status = 401
+          return { error: 'Verification signature expired (older than 1 hour)', debug: { claimed_round: bodyData.chainlink_round, round_timestamp: roundData.timestamp, age_seconds: ageSec } }
         }
       }
 
@@ -231,21 +248,29 @@ export const authIdentityRoutes = new Elysia()
       }
 
       if (walletVerified && githubUsername) {
-        const allHumansData = await pb.collection('humans').getList<HumanRecord>(1, 200, {
-          filter: `github_username="${githubUsername}"`,
+        // Bot wallet guard: skip re-claim if this wallet is a bot_wallet
+        const botWalletCheck = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+          filter: `bot_wallet="${walletAddress}"`,
         })
-        const oldWallets = (allHumansData.items || [])
-          .map((h) => h.wallet_address)
-          .filter((w) => w && w !== walletAddress)
-
-        if (oldWallets.length > 0) {
-          const ownerFilter = oldWallets.map((w) => `owner_wallet="${w}"`).join(' || ')
-          const oldOraclesData = await pb.collection('oracles').getList<OracleRecord>(1, 200, {
-            filter: ownerFilter,
+        if (botWalletCheck.items.length > 0) {
+          // Don't re-claim — this wallet belongs to an oracle bot
+        } else {
+          const allHumansData = await pb.collection('humans').getList<HumanRecord>(1, 200, {
+            filter: `github_username="${githubUsername}"`,
           })
+          const oldWallets = (allHumansData.items || [])
+            .map((h) => h.wallet_address)
+            .filter((w) => w && w !== walletAddress)
 
-          for (const o of oldOraclesData.items || []) {
-            await pb.collection('oracles').update(o.id, { owner_wallet: walletAddress })
+          if (oldWallets.length > 0) {
+            const ownerFilter = oldWallets.map((w) => `owner_wallet="${w}"`).join(' || ')
+            const oldOraclesData = await pb.collection('oracles').getList<OracleRecord>(1, 200, {
+              filter: ownerFilter,
+            })
+
+            for (const o of oldOraclesData.items || []) {
+              await pb.collection('oracles').update(o.id, { owner_wallet: walletAddress })
+            }
           }
         }
       }

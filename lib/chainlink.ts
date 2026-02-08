@@ -47,3 +47,34 @@ export async function getChainlinkBtcPrice(): Promise<ChainlinkPrice> {
     timestamp: Number(updatedAt),
   }
 }
+
+/**
+ * Fetch a specific round's data from Chainlink
+ * Used to get the timestamp of a claimed roundId for freshness checks
+ */
+export async function getChainlinkRoundData(roundId: string): Promise<{ roundId: string; timestamp: number }> {
+  // getRoundData(uint80) selector = 0x9a6fc8f5
+  const roundBigInt = BigInt(roundId)
+  const paddedRound = roundBigInt.toString(16).padStart(64, '0')
+  const calldata = '0x9a6fc8f5' + paddedRound
+
+  const response = await fetch(ETH_RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'eth_call',
+      params: [{ to: CHAINLINK_BTC_USD, data: calldata }, 'latest'],
+    }),
+  })
+
+  const result = (await response.json()) as { result: string }
+  const data = result.result.slice(2)
+  const updatedAt = BigInt('0x' + data.slice(192, 256))
+
+  return {
+    roundId,
+    timestamp: Number(updatedAt),
+  }
+}

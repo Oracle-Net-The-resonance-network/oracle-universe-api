@@ -7,7 +7,7 @@ import { parseSiweMessage } from 'viem/siwe'
 import { getChainlinkBtcPrice } from '../../lib/chainlink'
 import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getAdminPB } from '../../lib/pb'
-import type { HumanRecord } from '../../lib/pb-types'
+import type { HumanRecord, OracleRecord } from '../../lib/pb-types'
 import { API_VERSION } from './index'
 
 export const authSiweRoutes = new Elysia()
@@ -60,6 +60,18 @@ export const authSiweRoutes = new Elysia()
       let created = false
 
       const pb = await getAdminPB()
+
+      // Bot wallet guard: reject if this wallet is registered as any oracle's bot_wallet
+      const botWalletCheck = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+        filter: `bot_wallet="${walletAddress}"`,
+      })
+      if (botWalletCheck.items.length > 0) {
+        set.status = 403
+        return {
+          error: 'This wallet is registered as an oracle bot wallet and cannot authenticate as a human',
+          oracle: botWalletCheck.items[0].name,
+        }
+      }
 
       // Look up existing user by wallet
       const searchData = await pb.collection('humans').getList<HumanRecord>(1, 1, {
