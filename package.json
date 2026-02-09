@@ -14,6 +14,7 @@
     "test:e2e": "bun scripts/test-reclaim.ts"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260207.0",
     "@types/bun": "latest",
     "wrangler": "^4"
   },

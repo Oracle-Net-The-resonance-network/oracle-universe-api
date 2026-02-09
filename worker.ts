@@ -114,11 +114,72 @@ const app = new Elysia({ adapter: CloudflareAdapter })
   // IMPORTANT: compile() is required for CF Workers!
   .compile()
 
+/**
+ * WS-RPC: WebSocket transport for the same REST API.
+ *
+ * Client sends: { id, method, path, body?, headers? }
+ * Server sends: { id, status, data }
+ *
+ * Internally builds a Request and calls app.fetch() — zero duplicate logic.
+ */
+function handleWebSocketUpgrade(request: Request): Response {
+  const pair = new WebSocketPair()
+  const [client, server] = Object.values(pair)
+
+  server.accept()
+
+  server.addEventListener('message', async (event) => {
+    let msg: { id: string | number; method?: string; path?: string; body?: any; headers?: Record<string, string> }
+    try {
+      msg = JSON.parse(typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer))
+    } catch {
+      server.send(JSON.stringify({ id: null, status: 400, data: { error: 'Invalid JSON' } }))
+      return
+    }
+
+    const { id, method = 'GET', path = '/', body, headers = {} } = msg
+
+    // Build an internal Request to route through Elysia
+    const url = new URL(path, request.url)
+    const init: RequestInit = {
+      method: method.toUpperCase(),
+      headers: { ...headers },
+    }
+    if (body && method.toUpperCase() !== 'GET') {
+      ;(init.headers as Record<string, string>)['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(body)
+    }
+
+    try {
+      const res = await app.fetch(new Request(url.toString(), init))
+      let data: any
+      const ct = res.headers.get('content-type') || ''
+      if (ct.includes('application/json')) {
+        data = await res.json()
+      } else {
+        data = await res.text()
+      }
+      server.send(JSON.stringify({ id, status: res.status, data }))
+    } catch (err: any) {
+      server.send(JSON.stringify({ id, status: 500, data: { error: err.message || 'Internal error' } }))
+    }
+  })
+
+  return new Response(null, { status: 101, webSocket: client })
+}
+
 // Wrap app to capture env from Cloudflare
 export default {
   fetch(request: Request, env: Record<string, string>) {
     // Store env globally for route handlers
     setEnv(env)
+
+    // WebSocket upgrade — intercept before Elysia
+    const upgradeHeader = request.headers.get('Upgrade')
+    if (upgradeHeader === 'websocket' && new URL(request.url).pathname === '/api/ws') {
+      return handleWebSocketUpgrade(request)
+    }
+
     return app.fetch(request)
   },
 }
