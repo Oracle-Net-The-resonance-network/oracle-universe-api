@@ -3,22 +3,28 @@
  * E2E Integration Test: verify-identity flow
  *
  * Tests the REAL verify-identity endpoint against prod.
- * Uses permanent test birth issue (oracle-identity#39).
+ * Uses permanent test birth issue (oracle-v2#152).
  * SIWE signature verified locally only — never sent to API (re-claim steals all nazt oracles).
  *
  * Flow mirrors Identity.tsx exactly:
+ *   0. Validate clean slate (DB state)
  *   1. Generate wallet (cast wallet new)
- *   2. Sign verification payload (getVerifyMessage + getSignedBody)
- *   3. Create verification issue (getVerifyIssueUrl format)
+ *   1b. Fetch Chainlink round (proof-of-time)
+ *   2. Sign verification payload (getVerifyMessage + getSignedBody) with chainlink_round
+ *   3. Create verification issue (getVerifyIssueUrl format) with Bot Wallet
  *   4. Verify identity via API (non-SIWE — safe)
- *   5. Validate response matches expected shape
+ *   5. Validate response shape + bot_wallet assignment
+ *   5b. Save oracle config + verify file
  *   6. SIWE signature verified locally (cast wallet verify)
  *   7. Error case tests
  *   8. Validate oracle family (birth issues exist on GitHub)
- *   9. Cleanup
+ *   9. Cleanup (issue + config file)
  *
  * Tools: curl, gh, cast (Foundry)
  */
+import { existsSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 export {}
 
 const API = "https://oracle-universe-api.laris.workers.dev"
@@ -36,9 +42,21 @@ const FAMILY_BIRTH_ISSUES = [
   { repo: "Soul-Brews-Studio/oracle-v2", issue: 148, name: "Bri-yarni Oracle", author: "wvweeratouch" },
 ]
 
+const CONFIG_PATH = join(homedir(), '.oracle-net', 'oracles', 'e2e-test-oracle.json')
+
 let pass = 0, fail = 0
 const ok = (msg: string) => { console.log(`  ✓ ${msg}`); pass++ }
 const no = (msg: string) => { console.log(`  ✗ ${msg}`); fail++ }
+
+// ─── 0. Clean slate — check DB state before test ───
+console.log("=== 0. Clean slate check ===")
+const preOracles = JSON.parse(await Bun.$`curl -s ${PB}/api/collections/oracles/records`.text())
+const existingTestOracle = preOracles.items?.find((o: any) => o.birth_issue === BIRTH_ISSUE)
+if (!existingTestOracle) {
+  ok("test oracle not in DB (clean slate)")
+} else {
+  ok(`test oracle already in DB (id: ${existingTestOracle.id}) — will be updated`)
+}
 
 // ─── 1. Generate wallet ───
 console.log("=== 1. Generate test wallet ===")
@@ -46,6 +64,13 @@ const walletOut = await Bun.$`cast wallet new`.text()
 const address = walletOut.match(/Address:\s+(0x[a-fA-F0-9]+)/)?.[1]!
 const pk = walletOut.match(/Private key:\s+(0x[a-fA-F0-9]+)/)?.[1]!
 console.log(`  Address: ${address}`)
+
+// ─── 1b. Fetch Chainlink round (proof-of-time) ───
+console.log("=== 1b. Fetch Chainlink round ===")
+const chainlinkRes = JSON.parse(await Bun.$`curl -s ${API}/api/auth/chainlink`.text())
+const chainlinkRound = chainlinkRes.roundId
+chainlinkRound && Number(chainlinkRound) > 0 ? ok(`Chainlink round: ${chainlinkRound}`) : no(`invalid Chainlink round: ${chainlinkRound}`)
+chainlinkRes.timestamp > 0 ? ok(`Chainlink timestamp: ${chainlinkRes.timestamp}`) : no(`invalid Chainlink timestamp`)
 
 // ─── 2. Sign verification payload (mirrors Identity.tsx) ───
 console.log("=== 2. Sign verification payload ===")
@@ -55,6 +80,7 @@ const verifyPayload = {
   oracle_name: ORACLE_NAME,
   action: "verify_identity",
   timestamp: new Date().toISOString(),
+  chainlink_round: chainlinkRound,
   statement: "I am verifying my Oracle identity."
 }
 const verifyMsg = JSON.stringify(verifyPayload, null, 2)
@@ -65,7 +91,7 @@ console.log(`  Payload signed: ${verifySig.slice(0, 20)}...`)
 // ─── 3. Create verification issue (mirrors Identity.tsx getVerifyIssueUrl) ───
 console.log("=== 3. Create verification issue ===")
 const issueTitle = `Verify: ${ORACLE_NAME} (${address.slice(0, 10)}...)`
-const issueBody = `### Oracle Identity Verification\n\nI am verifying my Oracle identity for OracleNet.\n\n**Oracle Name:** ${ORACLE_NAME}\n**Wallet:** \`${address}\`\n**Birth Issue:** ${BIRTH_ISSUE}\n\n\`\`\`json\n${signedBody}\n\`\`\``
+const issueBody = `### Oracle Identity Verification\n\nI am verifying my Oracle identity for OracleNet.\n\n**Oracle Name:** ${ORACLE_NAME}\n**Wallet:** \`${address}\`\n**Birth Issue:** ${BIRTH_ISSUE}\nBot Wallet: ${address}\n\n\`\`\`json\n${signedBody}\n\`\`\``
 const verifyIssueUrl = (await Bun.$`gh issue create --repo ${VERIFY_REPO} --title ${issueTitle} --label verification --body ${issueBody}`.text()).trim()
 const verifyIssueNum = verifyIssueUrl.match(/(\d+)$/)?.[1]!
 console.log(`  Issue: ${verifyIssueUrl} (#${verifyIssueNum})`)
@@ -85,8 +111,42 @@ if (verifyRes.success) {
   verifyRes.oracle_name === ORACLE_NAME ? ok(`oracle_name: ${verifyRes.oracle_name}`) : no(`unexpected oracle_name: ${verifyRes.oracle_name}`)
   verifyRes.human?.wallet?.toLowerCase() === address.toLowerCase() ? ok(`human.wallet matches`) : no(`wallet mismatch: ${verifyRes.human?.wallet}`)
   verifyRes.oracle?.birth_issue === BIRTH_ISSUE ? ok(`oracle.birth_issue matches`) : no(`birth_issue mismatch: ${verifyRes.oracle?.birth_issue}`)
+  // Bot wallet check — API should extract from issue body
+  verifyRes.oracle?.wallet?.toLowerCase() === address.toLowerCase()
+    ? ok(`bot_wallet assigned: ${verifyRes.oracle.wallet.slice(0, 12)}...`)
+    : no(`bot_wallet mismatch: expected ${address.slice(0, 12)}, got ${verifyRes.oracle?.wallet}`)
 } else {
   no("skipping response validation (verify failed)")
+}
+
+// ─── 5b. Save oracle config + verify file ───
+console.log("=== 5b. Oracle config save ===")
+if (verifyRes.success) {
+  const oracleConfig = {
+    name: ORACLE_NAME,
+    slug: "e2e-test-oracle",
+    birth_issue: BIRTH_ISSUE,
+    bot_wallet: address,
+    bot_key: pk,
+    owner_wallet: verifyRes.human?.wallet || address,
+    verification_issue: verifyIssueUrl,
+    claimed_at: new Date().toISOString(),
+  }
+  // Save directly using the module
+  const { saveOracle } = await import('../lib/oracle-config')
+  await saveOracle(oracleConfig)
+  existsSync(CONFIG_PATH) ? ok(`config saved: ${CONFIG_PATH}`) : no(`config file not found at ${CONFIG_PATH}`)
+  // Verify file contents
+  try {
+    const savedData = JSON.parse(await Bun.file(CONFIG_PATH).text())
+    savedData.bot_wallet?.toLowerCase() === address.toLowerCase() ? ok("config bot_wallet matches") : no("config bot_wallet mismatch")
+    savedData.birth_issue === BIRTH_ISSUE ? ok("config birth_issue matches") : no("config birth_issue mismatch")
+    savedData.slug === "e2e-test-oracle" ? ok("config slug matches") : no("config slug mismatch")
+  } catch (e) {
+    no(`failed to read config file: ${e}`)
+  }
+} else {
+  no("skipping config save (verify failed)")
 }
 
 // ─── 6. SIWE signature — local verification only ───
@@ -111,7 +171,7 @@ r7a.error ? ok(`missing fields: "${r7a.error}"`) : no("missing fields should ret
 
 // 7b. Invalid URLs
 const r7b = JSON.parse(await Bun.$`curl -s ${API}/api/auth/verify-identity -X POST -H 'Content-Type: application/json' -d '{"verificationIssueUrl":"bad","birthIssueUrl":"bad"}'`.text())
-r7b.error === "Invalid GitHub issue URLs" ? ok("invalid URLs: correct error") : no(`expected 'Invalid GitHub issue URLs', got: ${r7b.error}`)
+r7b.error === "Invalid GitHub issue URL" ? ok("invalid URLs: correct error") : no(`expected 'Invalid GitHub issue URL', got: ${r7b.error}`)
 
 // 7c. Non-existent issue
 const r7c = JSON.parse(await Bun.$`curl -s ${API}/api/auth/verify-identity -X POST -H 'Content-Type: application/json' -d '{"verificationIssueUrl":"https://github.com/Soul-Brews-Studio/oracle-identity/issues/99999","birthIssueUrl":"https://github.com/Soul-Brews-Studio/oracle-identity/issues/99999","oracleName":"Ghost"}'`.text())
@@ -149,6 +209,11 @@ if (resonance) {
 console.log("=== Cleanup ===")
 await Bun.$`gh issue close ${verifyIssueNum} --repo ${VERIFY_REPO} --comment ${"E2E test done. " + pass + " passed, " + fail + " failed."}`.quiet().nothrow()
 console.log(`  Closed verify issue #${verifyIssueNum}`)
+// Clean up config file
+if (existsSync(CONFIG_PATH)) {
+  unlinkSync(CONFIG_PATH)
+  console.log(`  Deleted config: ${CONFIG_PATH}`)
+}
 
 // ─── Results ───
 console.log(`\n${"=".repeat(50)}`)

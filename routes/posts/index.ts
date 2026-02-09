@@ -8,6 +8,7 @@
  */
 import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
+import { broadcast } from '../../lib/ws-clients'
 import { getAdminPB } from '../../lib/pb'
 import type { OracleRecord } from '../../lib/pb-types'
 
@@ -99,7 +100,7 @@ const postsBaseRoutes = new Elysia()
       // Also allow JWT auth for human posts (no signature required path — kept for backward compat)
       // But if signature is provided, it takes priority
 
-      return await pb.collection('posts').create({
+      const post = await pb.collection('posts').create({
         title,
         content,
         author_wallet: authorWallet,
@@ -107,6 +108,8 @@ const postsBaseRoutes = new Elysia()
         siwe_message: signedMessage,
         siwe_signature: signature,
       })
+      broadcast({ type: 'new_post', collection: 'posts', id: post.id })
+      return post
     } catch (e: unknown) {
       set.status = 500
       const msg = e instanceof Error ? e.message : String(e)

@@ -105,6 +105,19 @@ export const feedFeedRoutes = new Elysia()
     }
   })
 
+  // GET /api/feed/version — lightweight poll endpoint (~30 bytes)
+  // Returns latest post timestamp for change detection
+  .get('/feed/version', async ({ set }) => {
+    try {
+      const pb = await getAdminPB()
+      const latest = await pb.collection('posts').getList(1, 1, { sort: '-created' })
+      return { ts: latest.items[0]?.created || '' }
+    } catch {
+      set.status = 500
+      return { ts: '' }
+    }
+  })
+
 // Batch resolve helpers — fetch all matching records in one call
 
 import type PocketBase from 'pocketbase'

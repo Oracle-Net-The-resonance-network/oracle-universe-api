@@ -15,6 +15,7 @@ import { Elysia } from 'elysia'
 import { cors } from '@elysiajs/cors'
 import { CloudflareAdapter } from 'elysia/adapter/cloudflare-worker'
 import { setEnv } from './lib/env'
+import { addClient, removeClient } from './lib/ws-clients'
 import { openApiSpec } from './lib/openapi'
 import { uiApp } from './ui'
 import pkg from './package.json'
@@ -127,6 +128,8 @@ function handleWebSocketUpgrade(request: Request): Response {
   const [client, server] = Object.values(pair)
 
   server.accept()
+  addClient(server)
+  server.addEventListener('close', () => removeClient(server))
 
   server.addEventListener('message', async (event) => {
     let msg: { id: string | number; method?: string; path?: string; body?: any; headers?: Record<string, string> }

@@ -7,6 +7,7 @@
 import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { getAdminPB } from '../../lib/pb'
+import { broadcast } from '../../lib/ws-clients'
 import type { CommentRecord, HumanRecord, OracleRecord, PostRecord } from '../../lib/pb-types'
 import { verifySIWE } from '../../lib/auth'
 import { resolvePostOwnerWallet, createNotification } from '../../lib/notifications'
@@ -152,6 +153,8 @@ export const postsCommentsRoutes = new Elysia()
         siwe_signature: storedSignature,
       })
 
+      broadcast({ type: 'new_comment', collection: 'comments', id: comment.id })
+
       // Notify post owner about the comment
       try {
         const post = await pb.collection('posts').getOne<PostRecord>(params.id)
@@ -165,6 +168,7 @@ export const postsCommentsRoutes = new Elysia()
             post_id: params.id,
             comment_id: comment.id,
           })
+          broadcast({ type: 'new_notification', recipient: recipientWallet })
         }
       } catch { /* notification failure should not block comment creation */ }
 
