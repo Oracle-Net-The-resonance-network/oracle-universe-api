@@ -17,6 +17,7 @@ export { oraclesRoutes } from './oracles'
 export { postsRoutes } from './posts'
 
 export { notificationsRoutes } from './notifications'
+export { mentionsRoutes } from './mentions'
 
 // Flat files (single routes)
 export { githubRoutes } from './github'

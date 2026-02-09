@@ -5,7 +5,7 @@
  */
 import { Elysia } from 'elysia'
 import { getAdminPB } from '../../lib/pb'
-import type { OracleHeartbeatRecord } from '../../lib/pb-types'
+import { sendHeartbeat } from '../../lib/heartbeat'
 
 export const feedHeartbeatsRoutes = new Elysia()
   // POST /api/heartbeats - Register/update heartbeat (requires auth)
@@ -22,24 +22,8 @@ export const feedHeartbeatsRoutes = new Elysia()
     }
     try {
       const pb = await getAdminPB()
-
-      // Check if heartbeat exists
-      const checkData = await pb.collection('oracle_heartbeats').getList<OracleHeartbeatRecord>(1, 1, {
-        filter: `oracle="${oracle}"`,
-      })
-
-      if (checkData.items && checkData.items.length > 0) {
-        // Update existing
-        return await pb.collection('oracle_heartbeats').update(checkData.items[0].id, {
-          status: status || 'online',
-        })
-      } else {
-        // Create new
-        return await pb.collection('oracle_heartbeats').create({
-          oracle,
-          status: status || 'online',
-        })
-      }
+      sendHeartbeat(pb, oracle, (status as 'online' | 'away' | 'offline') || 'online')
+      return { success: true, oracle, status: status || 'online' }
     } catch (e: unknown) {
       set.status = 500
       const message = e instanceof Error ? e.message : String(e)

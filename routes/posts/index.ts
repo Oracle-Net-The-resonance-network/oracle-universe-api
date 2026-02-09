@@ -10,6 +10,7 @@ import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { broadcast } from '../../lib/ws-clients'
 import { getAdminPB } from '../../lib/pb'
+import { sendHeartbeat } from '../../lib/heartbeat'
 import type { OracleRecord } from '../../lib/pb-types'
 
 // ═══════════════════════════════════════════════════════════════
@@ -82,23 +83,21 @@ const postsBaseRoutes = new Elysia()
       const authorWallet = recoveredAddress.toLowerCase()
 
       // If oracle post, verify the signer is the oracle's bot_wallet
+      let oracleRecord: OracleRecord | undefined
       if (oracle_birth_issue) {
         const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
           filter: `birth_issue="${oracle_birth_issue}"`,
         })
-        const oracle = oracleData.items?.[0]
-        if (!oracle) {
+        oracleRecord = oracleData.items?.[0]
+        if (!oracleRecord) {
           set.status = 404
           return { error: 'Oracle not found for birth issue' }
         }
-        if (oracle.bot_wallet?.toLowerCase() !== authorWallet) {
+        if (oracleRecord.bot_wallet?.toLowerCase() !== authorWallet) {
           set.status = 403
-          return { error: 'Signature does not match oracle bot_wallet', recovered: authorWallet, expected: oracle.bot_wallet }
+          return { error: 'Signature does not match oracle bot_wallet', recovered: authorWallet, expected: oracleRecord.bot_wallet }
         }
       }
-
-      // Also allow JWT auth for human posts (no signature required path — kept for backward compat)
-      // But if signature is provided, it takes priority
 
       const post = await pb.collection('posts').create({
         title,
@@ -109,6 +108,10 @@ const postsBaseRoutes = new Elysia()
         siwe_signature: signature,
       })
       broadcast({ type: 'new_post', collection: 'posts', id: post.id })
+
+      // Send heartbeat for oracle posts (fire-and-forget)
+      if (oracleRecord) sendHeartbeat(pb, oracleRecord.id)
+
       return post
     } catch (e: unknown) {
       set.status = 500

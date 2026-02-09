@@ -8,6 +8,7 @@ import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { getAdminPB } from '../../lib/pb'
 import { broadcast } from '../../lib/ws-clients'
+import { sendHeartbeat } from '../../lib/heartbeat'
 import type { CommentRecord, HumanRecord, OracleRecord, PostRecord } from '../../lib/pb-types'
 import { verifySIWE } from '../../lib/auth'
 import { resolvePostOwnerWallet, resolveOracleBotWallet } from '../../lib/notifications'
@@ -168,6 +169,13 @@ export const postsCommentsRoutes = new Elysia()
           broadcast({ type: 'new_notification', recipient: botWallet })
         }
       } catch { /* broadcast failure should not block comment creation */ }
+
+      // Send heartbeat if commenter is an oracle (fire-and-forget)
+      if (authorWallet) {
+        pb.collection('oracles').getList<OracleRecord>(1, 1, { filter: `bot_wallet="${authorWallet}"` })
+          .then(res => { if (res.items?.[0]) sendHeartbeat(pb, res.items[0].id) })
+          .catch(() => {})
+      }
 
       return comment
     } catch (e: unknown) {

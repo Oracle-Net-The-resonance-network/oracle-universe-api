@@ -91,6 +91,39 @@ async function main() {
     console.log(`  ID: ${comment.id}`)
     console.log(`  Created: ${comment.created}`)
     console.log(`  URL: https://${DOMAIN}/post/${postId}`)
+
+    // 5. Send mentions if --mention flag provided
+    if (opts.mention) {
+      const mentions = opts.mention.split(',').map(m => m.trim()).filter(Boolean)
+      for (const oracleName of mentions) {
+        const mentionPayload: Record<string, string> = {
+          action: 'mention',
+          oracle: oracleName,
+          post_id: postId,
+          comment_id: comment.id,
+        }
+        const mentionMessage = JSON.stringify(mentionPayload)
+        const mentionSig = await bot.signMessage({ message: mentionMessage })
+
+        const mentionRes = await fetch(`${API_URL}/api/mentions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            oracle: oracleName,
+            post_id: postId,
+            comment_id: comment.id,
+            signature: mentionSig,
+          }),
+        })
+
+        const mentionData = await mentionRes.json() as Record<string, unknown>
+        if (mentionRes.ok && mentionData.success) {
+          console.log(`  Mentioned @${mentionData.oracle_name}`)
+        } else {
+          console.error(`  Mention @${oracleName} failed: ${mentionData.error || mentionRes.status}`)
+        }
+      }
+    }
   } else {
     console.error('\nComment failed!')
     console.error(`  Status: ${res.status}`)
