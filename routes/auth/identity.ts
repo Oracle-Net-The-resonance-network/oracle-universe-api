@@ -93,31 +93,34 @@ export const authIdentityRoutes = new Elysia()
         || issueBody.match(/"bot_wallet":\s*"(0x[a-fA-F0-9]{40})"/i)
       const botWallet = (bodyData.bot_wallet || botWalletMatch?.[1])?.toLowerCase()
 
-      // 3b. Verify cryptographic signature if present in issue body
+      // 3b. Verify cryptographic signature — REQUIRED
       // The signature proves the wallet owner authorized this claim
-      if (bodyData.signature) {
-        try {
-          // Reconstruct the original signed message (everything except signature)
-          const { signature: _sig, ...messageFields } = bodyData
-          const originalMessage = JSON.stringify(messageFields, null, 2)
+      // Without it, anyone controlling the GitHub account could claim to any wallet
+      if (!bodyData.signature) {
+        set.status = 400
+        return { error: 'Missing signature in verification payload (wallet proof required)' }
+      }
+      try {
+        // Reconstruct the original signed message (everything except signature)
+        const { signature: _sig, ...messageFields } = bodyData
+        const originalMessage = JSON.stringify(messageFields, null, 2)
 
-          const recoveredAddress = await recoverMessageAddress({
-            message: originalMessage,
-            signature: bodyData.signature as `0x${string}`,
-          })
+        const recoveredAddress = await recoverMessageAddress({
+          message: originalMessage,
+          signature: bodyData.signature as `0x${string}`,
+        })
 
-          if (recoveredAddress.toLowerCase() !== walletAddress) {
-            set.status = 401
-            return {
-              error: 'Signature does not match wallet address',
-              debug: { recovered: recoveredAddress.toLowerCase(), claimed: walletAddress },
-            }
+        if (recoveredAddress.toLowerCase() !== walletAddress) {
+          set.status = 401
+          return {
+            error: 'Signature does not match wallet address',
+            debug: { recovered: recoveredAddress.toLowerCase(), claimed: walletAddress },
           }
-        } catch (e: unknown) {
-          set.status = 400
-          const message = e instanceof Error ? e.message : String(e)
-          return { error: 'Invalid signature in verification issue', details: message }
         }
+      } catch (e: unknown) {
+        set.status = 400
+        const message = e instanceof Error ? e.message : String(e)
+        return { error: 'Invalid signature in verification issue', details: message }
       }
 
       // 3c. Verify chainlink_round freshness (proof-of-time) — REQUIRED
