@@ -14,7 +14,7 @@
 import { Elysia } from 'elysia'
 import { recoverMessageAddress } from 'viem'
 import { parseSiweMessage } from 'viem/siwe'
-import { getChainlinkBtcPrice } from '../../lib/chainlink'
+import { getChainlinkRoundData } from '../../lib/chainlink'
 import { createJWT, DEFAULT_SALT } from '../../lib/auth'
 import { getAdminPB } from '../../lib/pb'
 import type { AgentRecord, OracleRecord } from '../../lib/pb-types'
@@ -55,14 +55,14 @@ export const authAgentSiweRoutes = new Elysia()
       }
 
       // Verify proof-of-time: nonce should be a recent Chainlink roundId
-      const currentChainlink = await getChainlinkBtcPrice()
-      const nonceBigInt = BigInt(siweMessage.nonce)
-      const currentRoundBigInt = BigInt(currentChainlink.roundId)
-
-      // Allow roundId within last 10 rounds (~1 hour for BTC/USD)
-      if (currentRoundBigInt - nonceBigInt > 10n) {
+      // Fetch the round's actual timestamp and compare with now
+      // Window: 65 min (3900s) — Chainlink BTC/USD heartbeat is 1h, need buffer above that
+      const roundData = await getChainlinkRoundData(siweMessage.nonce)
+      const nowSec = Math.floor(Date.now() / 1000)
+      const ageSec = nowSec - roundData.timestamp
+      if (ageSec > 3900) {
         set.status = 401
-        return { error: 'Nonce (roundId) is too old - signature expired' }
+        return { error: 'Nonce (roundId) is too old - signature expired (older than 65 minutes)', age_seconds: ageSec }
       }
 
       const walletAddress = recoveredAddress.toLowerCase()
@@ -142,9 +142,8 @@ export const authAgentSiweRoutes = new Elysia()
         created,
         token, // Custom JWT with type: 'agent'
         proofOfTime: {
-          btc_price: currentChainlink.price,
           round_id: siweMessage.nonce,
-          timestamp: currentChainlink.timestamp,
+          timestamp: roundData.timestamp,
         },
         agent: {
           id: agent.id,

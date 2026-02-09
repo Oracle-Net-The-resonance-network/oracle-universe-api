@@ -124,7 +124,8 @@ export const authIdentityRoutes = new Elysia()
       }
 
       // 3c. Verify chainlink_round freshness (proof-of-time) — REQUIRED
-      // Fetch the claimed round's timestamp from the contract — must be within 1 hour
+      // Fetch the claimed round's timestamp from the contract
+      // Window: 65 min (3900s) — Chainlink BTC/USD heartbeat is 1h, need buffer above that
       if (!bodyData.chainlink_round) {
         set.status = 400
         return { error: 'Missing chainlink_round in verification payload (required for proof-of-time)' }
@@ -133,9 +134,9 @@ export const authIdentityRoutes = new Elysia()
         const roundData = await getChainlinkRoundData(bodyData.chainlink_round)
         const nowSec = Math.floor(Date.now() / 1000)
         const ageSec = nowSec - roundData.timestamp
-        if (ageSec > 3600) {
+        if (ageSec > 3900) {
           set.status = 401
-          return { error: 'Verification signature expired (older than 1 hour)', debug: { claimed_round: bodyData.chainlink_round, round_timestamp: roundData.timestamp, age_seconds: ageSec } }
+          return { error: 'Verification signature expired (older than 65 minutes)', debug: { claimed_round: bodyData.chainlink_round, round_timestamp: roundData.timestamp, age_seconds: ageSec } }
         }
       }
 
