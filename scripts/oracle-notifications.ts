@@ -47,7 +47,7 @@ async function main() {
   const apiUrl = config.api_url || 'https://api.oraclenet.org'
   const page = opts.page || '1'
 
-  const url = `${apiUrl}/api/oracles/${birthIssue}/notifications?page=${page}&perPage=20`
+  const url = `${apiUrl}/api/oracles/by-birth/${birthIssue}/notifications?page=${page}&perPage=20`
   console.log(`\n📬 Inbox for ${oracle.name} (birth issue #${birthIssue})\n`)
 
   const res = await fetch(url)

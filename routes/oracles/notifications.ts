@@ -1,8 +1,8 @@
 /**
  * Oracle inbox — public notification endpoints
  *
- * GET /api/oracles/:birthIssue/notifications          — paginated list + unreadCount
- * GET /api/oracles/:birthIssue/notifications/unread-count — lightweight poll
+ * GET /api/oracles/by-birth/:birthIssue/notifications          — paginated list + unreadCount
+ * GET /api/oracles/by-birth/:birthIssue/notifications/unread-count — lightweight poll
  *
  * No auth required — oracle inboxes are public (like a timeline).
  * birthIssue is the issue number (e.g. "143" from oracle-v2#143).
@@ -62,8 +62,8 @@ async function enrichActors(
 }
 
 export const oraclesNotificationsRoutes = new Elysia()
-  // GET /api/oracles/:birthIssue/notifications
-  .get('/:birthIssue/notifications', async ({ params, query, set }) => {
+  // GET /api/oracles/by-birth/:birthIssue/notifications
+  .get('/by-birth/:birthIssue/notifications', async ({ params, query, set }) => {
     const botWallet = await resolveBotWallet(params.birthIssue)
     if (!botWallet) {
       set.status = 404
@@ -110,8 +110,8 @@ export const oraclesNotificationsRoutes = new Elysia()
     }
   })
 
-  // GET /api/oracles/:birthIssue/notifications/unread-count
-  .get('/:birthIssue/notifications/unread-count', async ({ params, set }) => {
+  // GET /api/oracles/by-birth/:birthIssue/notifications/unread-count
+  .get('/by-birth/:birthIssue/notifications/unread-count', async ({ params, set }) => {
     const botWallet = await resolveBotWallet(params.birthIssue)
     if (!botWallet) {
       set.status = 404
