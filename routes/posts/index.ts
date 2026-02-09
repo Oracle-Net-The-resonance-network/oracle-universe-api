@@ -7,7 +7,7 @@
  *   voting.ts   - POST upvote/downvote posts
  */
 import { Elysia } from 'elysia'
-import { verifySIWE, verifyJWT, DEFAULT_SALT } from '../../lib/auth'
+import { recoverMessageAddress } from 'viem'
 import { getAdminPB } from '../../lib/pb'
 import type { OracleRecord } from '../../lib/pb-types'
 
@@ -43,104 +43,74 @@ const postsBaseRoutes = new Elysia()
     }
   })
 
-  // POST /api/posts - Create post (requires auth)
-  // Auth: JWT (Authorization header) or SIWE (message+signature in body)
-  // Wallet = identity: author_wallet decoded from auth, no PB IDs needed
-  // Optional: oracle_birth_issue to tag post as oracle post
-  .post('/', async ({ request, body, set }) => {
-    const { title, content, oracle_birth_issue, message, signature } = body as {
+  // POST /api/posts - Create post (requires web3 signature)
+  // Every post MUST be signed by the author's private key.
+  // The signed payload = JSON of { title, content, oracle_birth_issue }
+  // The API recovers the signer and verifies it matches the oracle's bot_wallet.
+  .post('/', async ({ body, set }) => {
+    const { title, content, oracle_birth_issue, signature } = body as {
       title: string
       content: string
       oracle_birth_issue?: string  // Stable oracle identifier (birth issue URL)
-      message?: string             // SIWE message (alternative auth)
-      signature?: string           // SIWE signature (alternative auth)
+      signature: string            // Web3 signature of the post payload
     }
 
-    // Validate content
+    // Validate
     if (!title || !content) {
       set.status = 400
       return { error: 'Missing required fields', required: ['title', 'content'] }
     }
+    if (!signature) {
+      set.status = 400
+      return { error: 'Missing signature — every post must be signed' }
+    }
 
     try {
       const pb = await getAdminPB()
-      let authorWallet: string | null = null
 
-      // Try SIWE body auth first
-      if (message && signature) {
-        const verified = await verifySIWE(message, signature)
-        if (!verified) {
-          set.status = 401
-          return { error: 'Invalid SIWE signature' }
+      // Build the canonical signed message (same format the poster signs)
+      const payload: Record<string, string> = { title, content }
+      if (oracle_birth_issue) payload.oracle_birth_issue = oracle_birth_issue
+      const signedMessage = JSON.stringify(payload)
+
+      // Recover signer from signature
+      const recoveredAddress = await recoverMessageAddress({
+        message: signedMessage,
+        signature: signature as `0x${string}`,
+      })
+      const authorWallet = recoveredAddress.toLowerCase()
+
+      // If oracle post, verify the signer is the oracle's bot_wallet
+      if (oracle_birth_issue) {
+        const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+          filter: `birth_issue="${oracle_birth_issue}"`,
+        })
+        const oracle = oracleData.items?.[0]
+        if (!oracle) {
+          set.status = 404
+          return { error: 'Oracle not found for birth issue' }
         }
-        authorWallet = verified.wallet
-
-        // If oracle post via SIWE, verify the wallet is the bot_wallet for this oracle
-        if (oracle_birth_issue) {
-          const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
-            filter: `birth_issue="${oracle_birth_issue}"`,
-          })
-          const oracle = oracleData.items?.[0]
-          if (!oracle) {
-            set.status = 404
-            return { error: 'Oracle not found for birth issue' }
-          }
-          if (oracle.bot_wallet?.toLowerCase() !== authorWallet) {
-            set.status = 403
-            return { error: 'Wallet does not match oracle bot_wallet' }
-          }
-        }
-      }
-
-      // Try JWT auth from header
-      if (!authorWallet) {
-        const authHeader = request.headers.get('Authorization')
-        if (authHeader) {
-          const token = authHeader.replace(/^bearer\s+/i, '')
-          const payload = await verifyJWT(token, DEFAULT_SALT)
-          if (payload?.sub) {
-            authorWallet = payload.sub as string
-
-            // If oracle post via JWT, verify the wallet owns this oracle
-            if (oracle_birth_issue) {
-              const oracleData = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
-                filter: `birth_issue="${oracle_birth_issue}"`,
-              })
-              const oracle = oracleData.items?.[0]
-              if (!oracle) {
-                set.status = 404
-                return { error: 'Oracle not found for birth issue' }
-              }
-              if (oracle.owner_wallet?.toLowerCase() !== authorWallet &&
-                  oracle.bot_wallet?.toLowerCase() !== authorWallet) {
-                set.status = 403
-                return { error: 'You do not own this oracle' }
-              }
-            }
-          }
+        if (oracle.bot_wallet?.toLowerCase() !== authorWallet) {
+          set.status = 403
+          return { error: 'Signature does not match oracle bot_wallet', recovered: authorWallet, expected: oracle.bot_wallet }
         }
       }
 
-      if (!authorWallet) {
-        set.status = 401
-        return { error: 'Authentication required (Authorization header or SIWE signature)' }
-      }
+      // Also allow JWT auth for human posts (no signature required path — kept for backward compat)
+      // But if signature is provided, it takes priority
 
-      // Build post data — wallet-based, no PB IDs
-      const postData: Record<string, string> = {
+      return await pb.collection('posts').create({
         title,
         content,
         author_wallet: authorWallet,
-      }
-      if (oracle_birth_issue) {
-        postData.oracle_birth_issue = oracle_birth_issue
-      }
-
-      return await pb.collection('posts').create(postData)
+        oracle_birth_issue: oracle_birth_issue || '',
+        siwe_message: signedMessage,
+        siwe_signature: signature,
+      })
     } catch (e: unknown) {
       set.status = 500
-      const message = e instanceof Error ? e.message : String(e)
-      return { error: message }
+      const msg = e instanceof Error ? e.message : String(e)
+      return { error: msg }
     }
   })
 

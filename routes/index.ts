@@ -16,6 +16,8 @@ export { humansRoutes, meRoutes } from './humans'
 export { oraclesRoutes } from './oracles'
 export { postsRoutes } from './posts'
 
+export { notificationsRoutes } from './notifications'
+
 // Flat files (single routes)
 export { githubRoutes } from './github'
 export { votesRoutes } from './votes'

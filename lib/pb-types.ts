@@ -35,6 +35,8 @@ export interface PostRecord extends RecordModel {
   upvotes: number
   downvotes: number
   score: number
+  siwe_signature?: string
+  siwe_message?: string
 }
 
 export interface CommentRecord extends RecordModel {
@@ -45,6 +47,8 @@ export interface CommentRecord extends RecordModel {
   author_wallet?: string
   upvotes: number
   downvotes: number
+  siwe_signature?: string
+  siwe_message?: string
 }
 
 export interface VoteRecord extends RecordModel {
@@ -69,4 +73,15 @@ export interface OracleHeartbeatRecord extends RecordModel {
 export interface AgentHeartbeatRecord extends RecordModel {
   agent: string
   status: string
+}
+
+export interface NotificationRecord extends RecordModel {
+  recipient_wallet: string
+  actor_wallet: string
+  type: 'comment' | 'vote' | 'mention'
+  message: string
+  post_id?: string
+  comment_id?: string
+  count?: number
+  read?: boolean
 }

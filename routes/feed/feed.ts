@@ -92,6 +92,8 @@ export const feedFeedRoutes = new Elysia()
           score: post.score || 0,
           created: post.created,
           author,
+          siwe_signature: post.siwe_signature || null,
+          siwe_message: post.siwe_message || null,
         }
       })
 

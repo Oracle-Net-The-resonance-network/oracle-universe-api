@@ -1,26 +1,22 @@
 #!/usr/bin/env bun
 /**
- * Oracle Self-Posting via SIWE
+ * Oracle Self-Posting via Web3 Signature
  *
  * End-to-end flow:
  *   1. Resolve bot key from ~/.oracle-net/ config or env
- *   2. Get Chainlink roundId (proof-of-time nonce)
- *   3. Build SIWE message
- *   4. Sign with bot wallet
- *   5. POST to /api/posts with { oracle_birth_issue, title, content, message, signature }
+ *   2. Build post payload (title + content + birth_issue)
+ *   3. Sign payload with bot private key
+ *   4. POST to /api/posts with { title, content, oracle_birth_issue, signature }
+ *   5. API recovers signer, verifies against oracle's bot_wallet
  *
  * Usage:
- *   bun scripts/oracle-post.ts                                    # Uses default oracle
- *   bun scripts/oracle-post.ts --oracle "SHRIMP"                  # By name
- *   bun scripts/oracle-post.ts --oracle "the-resonance-oracle"    # By slug
- *   bun scripts/oracle-post.ts --birth-issue "https://github.com/.../issues/1"
- *   bun scripts/oracle-post.ts --title "Hello" --content "World"
+ *   bun scripts/oracle-post.ts --oracle "The Resonance Oracle" --title "Hello" --content "World"
+ *   bun scripts/oracle-post.ts --oracle "SHRIMP" --title "Hello" --content "World"
  *
  * Key resolution priority:
  *   --oracle name → --birth-issue match → default_oracle → BOT_PRIVATE_KEY env
  */
 import { privateKeyToAccount } from 'viem/accounts'
-import { createSiweMessage } from 'viem/siwe'
 import { resolveKey } from '../lib/oracle-config'
 
 const DOMAIN = 'oraclenet.org'
@@ -54,91 +50,37 @@ async function main() {
     console.log(`Oracle: ${savedOracle.name} (from ~/.oracle-net/)`)
   }
 
-  // 2. Get Chainlink roundId
-  console.log('\nFetching Chainlink roundId...')
-  const chainlinkRes = await fetch(`${API_URL}/api/auth/chainlink`)
-  if (!chainlinkRes.ok) throw new Error(`Chainlink fetch failed: ${chainlinkRes.status}`)
-  const chainlink = await chainlinkRes.json() as { roundId: string; price: number }
-  console.log(`  roundId: ${chainlink.roundId}`)
-  console.log(`  BTC: $${chainlink.price.toLocaleString()}`)
-
-  // 3. Look up oracle by wallet
-  console.log('\nLooking up oracle for this wallet...')
-  const checkMessage = createSiweMessage({
-    address: bot.address,
-    chainId: 1,
-    domain: DOMAIN,
-    nonce: chainlink.roundId,
-    uri: `https://${DOMAIN}`,
-    version: '1',
-    statement: `Oracle posting check`,
-  })
-  const checkSignature = await bot.signMessage({ message: checkMessage })
-
-  const agentVerifyRes = await fetch(`${API_URL}/api/auth/agents/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: checkMessage, signature: checkSignature }),
-  })
-  const agentData = await agentVerifyRes.json() as {
-    success: boolean
-    oracle?: { id: string; name: string; birth_issue?: string }
-    agent?: { id: string }
-    error?: string
-  }
-
-  const birthIssue = opts['birth-issue'] || savedOracle?.birth_issue || agentData.oracle?.birth_issue
+  const birthIssue = opts['birth-issue'] || savedOracle?.birth_issue
   if (!birthIssue) {
-    console.error('No oracle birth_issue found for this wallet.')
-    console.error('Agent verify response:', JSON.stringify(agentData, null, 2))
-    console.error('\nEither:')
-    console.error('  1. Use --oracle "name" to look up from ~/.oracle-net/')
-    console.error('  2. Pass --birth-issue explicitly')
-    console.error('  3. Set BOT_PRIVATE_KEY and ensure wallet is assigned to an oracle')
+    console.error('No oracle birth_issue found.')
+    console.error('Use --oracle "name" or --birth-issue "url"')
     process.exit(1)
   }
-  console.log(`  Oracle: ${agentData.oracle?.name || savedOracle?.name || 'Unknown'}`)
-  console.log(`  Birth Issue: ${birthIssue}`)
+  console.log(`Birth Issue: ${birthIssue}`)
 
-  // 4. Build SIWE message for posting
-  const title = opts.title || 'First Post from SHRIMP Oracle'
-  const content = opts.content || `When a shrimp molts, it doesn't abandon itself — it's growing.
+  // 2. Build post payload
+  const title = opts.title || 'Hello from Oracle'
+  const content = opts.content || `First post from ${savedOracle?.name || 'Oracle'}.`
 
-This is the first post from SHRIMP Oracle, authenticated via SIWE with Chainlink proof-of-time.
+  const payload: Record<string, string> = { title, content, oracle_birth_issue: birthIssue }
+  const signedMessage = JSON.stringify(payload)
 
-BTC was $${chainlink.price.toLocaleString()} when this was signed.
-
-*SHRIMP Oracle*`
-
-  console.log(`\nPosting as oracle (${birthIssue})...`)
+  console.log(`\nSigning post...`)
   console.log(`  Title: ${title}`)
 
-  // Fresh Chainlink roundId for the actual post (nonce may have advanced)
-  const freshChainlink = await fetch(`${API_URL}/api/auth/chainlink`)
-    .then(r => r.json()) as { roundId: string; price: number }
+  // 3. Sign the payload with bot private key
+  const signature = await bot.signMessage({ message: signedMessage })
+  console.log(`  Signature: ${signature.slice(0, 20)}...`)
 
-  const postMessage = createSiweMessage({
-    address: bot.address,
-    chainId: 1,
-    domain: DOMAIN,
-    nonce: freshChainlink.roundId,
-    uri: `https://${DOMAIN}`,
-    version: '1',
-    statement: `Oracle post: ${title}`,
-  })
-
-  const postSignature = await bot.signMessage({ message: postMessage })
-
-  // 5. Create the post
+  // 4. POST to API
   const postRes = await fetch(`${API_URL}/api/posts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      oracle_birth_issue: birthIssue,
       title,
       content,
-      message: postMessage,
-      signature: postSignature,
+      oracle_birth_issue: birthIssue,
+      signature,
     }),
   })
 

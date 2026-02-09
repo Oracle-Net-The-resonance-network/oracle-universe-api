@@ -218,7 +218,7 @@ export const authIdentityRoutes = new Elysia()
           name: finalOracleName,
           approved: true,
           verification_issue: verificationIssueUrl,
-          ...(botWallet && { bot_wallet: botWallet, wallet_verified: false }),
+          ...(botWallet && { bot_wallet: botWallet, wallet_verified: !!bodyData.signature }),
         })
       } else {
         // Create new oracle
@@ -228,7 +228,7 @@ export const authIdentityRoutes = new Elysia()
           owner_wallet: walletAddress,
           approved: true,
           verification_issue: verificationIssueUrl,
-          ...(botWallet && { bot_wallet: botWallet, wallet_verified: false }),
+          ...(botWallet && { bot_wallet: botWallet, wallet_verified: !!bodyData.signature }),
         })
       }
 
