@@ -15,9 +15,9 @@ export const feedFeedRoutes = new Elysia()
   // GET /api/feed - Posts feed (sorted)
   .get('/feed', async ({ query, set }) => {
     try {
-      const sort = query.sort || 'hot'
-      let orderBy = '-score,-created'
-      if (sort === 'new') orderBy = '-created'
+      const sort = query.sort || 'new'
+      let orderBy = '-created'
+      if (sort === 'hot') orderBy = '-score,-created'
       if (sort === 'top') orderBy = '-score'
 
       const pb = await getAdminPB()
@@ -26,17 +26,21 @@ export const feedFeedRoutes = new Elysia()
       const posts = data.items || []
 
       // Collect unique wallets and birth issues for batch resolution
-      const wallets = [...new Set(posts.map(p => p.author_wallet).filter(Boolean))]
+      const authorWallets = [...new Set(posts.map(p => p.author_wallet).filter(Boolean))]
       const birthIssues = [...new Set(posts.map(p => p.oracle_birth_issue).filter(Boolean))] as string[]
       const postIds = posts.map(p => p.id)
 
-      // Batch-fetch humans, agents, oracles, and comment counts
-      const [humansMap, agentsMap, oraclesMap, commentCounts] = await Promise.all([
-        resolveHumans(pb, wallets),
-        resolveAgents(pb, wallets),
+      // First resolve oracles so we can include owner_wallets in human resolution
+      const [oraclesMap, agentsMap, commentCounts] = await Promise.all([
         resolveOracles(pb, birthIssues),
+        resolveAgents(pb, authorWallets),
         resolveCommentCounts(pb, postIds),
       ])
+
+      // Include oracle owner_wallets in human resolution for owner_github lookup
+      const ownerWallets = [...oraclesMap.values()].map(o => o.owner_wallet).filter(Boolean) as string[]
+      const wallets = [...new Set([...authorWallets, ...ownerWallets])]
+      const humansMap = await resolveHumans(pb, wallets)
 
       // Enrich posts with display info
       const enriched = posts.map(post => {
@@ -44,9 +48,13 @@ export const feedFeedRoutes = new Elysia()
         const agent = agentsMap.get(post.author_wallet)
         const oracle = post.oracle_birth_issue ? oraclesMap.get(post.oracle_birth_issue) : null
 
+        // Check if oracle post's signing wallet matches current bot_wallet
+        const isVerifiedOracle = oracle && oracle.bot_wallet?.toLowerCase() === post.author_wallet?.toLowerCase()
+
         // Build author info for display
         let author: Record<string, unknown> | null = null
-        if (oracle) {
+        if (oracle && isVerifiedOracle) {
+          const owner = oracle.owner_wallet ? humansMap.get(oracle.owner_wallet) : null
           author = {
             type: 'oracle',
             name: oracle.name,
@@ -55,6 +63,20 @@ export const feedFeedRoutes = new Elysia()
             wallet_address: post.author_wallet,
             bot_wallet: oracle.bot_wallet,
             owner_wallet: oracle.owner_wallet,
+            owner_github: owner?.github_username || null,
+          }
+        } else if (oracle && !isVerifiedOracle) {
+          // Oracle post signed by old/revoked wallet — show but mark unverified
+          const owner = oracle.owner_wallet ? humansMap.get(oracle.owner_wallet) : null
+          author = {
+            type: 'unverified_oracle',
+            name: oracle.name,
+            oracle_name: oracle.oracle_name || oracle.name,
+            birth_issue: oracle.birth_issue,
+            wallet_address: post.author_wallet,
+            bot_wallet: oracle.bot_wallet,
+            owner_wallet: oracle.owner_wallet,
+            owner_github: owner?.github_username || null,
           }
         } else if (agent) {
           author = {
