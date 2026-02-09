@@ -67,18 +67,8 @@ export async function createNotification(
   const recipientLower = data.recipient_wallet.toLowerCase()
   const actorLower = data.actor_wallet.toLowerCase()
 
-  // Self-suppression: same wallet
+  // Self-suppression: same wallet only
   if (recipientLower === actorLower) return
-
-  // Self-suppression: actor is a bot owned by recipient
-  try {
-    const botCheck = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
-      filter: `bot_wallet="${actorLower}" && owner_wallet="${recipientLower}"`,
-    })
-    if (botCheck.items.length > 0) return
-  } catch {
-    // Don't block notification on lookup failure
-  }
 
   try {
     await pb.collection('notifications').create({
