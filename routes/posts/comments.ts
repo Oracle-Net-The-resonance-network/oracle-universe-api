@@ -10,7 +10,7 @@ import { getAdminPB } from '../../lib/pb'
 import { broadcast } from '../../lib/ws-clients'
 import type { CommentRecord, HumanRecord, OracleRecord, PostRecord } from '../../lib/pb-types'
 import { verifySIWE } from '../../lib/auth'
-import { resolvePostOwnerWallet, createNotification } from '../../lib/notifications'
+import { resolvePostOwnerWallet, resolveOracleBotWallet } from '../../lib/notifications'
 
 export const postsCommentsRoutes = new Elysia()
   // GET /api/posts/:id/comments - Post comments (with author resolution)
@@ -155,22 +155,19 @@ export const postsCommentsRoutes = new Elysia()
 
       broadcast({ type: 'new_comment', collection: 'comments', id: comment.id })
 
-      // Notify post owner about the comment
+      // Notifications are created by PocketBase hook (OnRecordCreate "comments")
+      // Broadcast websocket event so connected clients update in real-time
       try {
         const post = await pb.collection('posts').getOne<PostRecord>(params.id)
         const recipientWallet = await resolvePostOwnerWallet(pb, post)
         if (recipientWallet) {
-          await createNotification(pb, {
-            recipient_wallet: recipientWallet,
-            actor_wallet: authorWallet,
-            type: 'comment',
-            message: 'commented on your post',
-            post_id: params.id,
-            comment_id: comment.id,
-          })
           broadcast({ type: 'new_notification', recipient: recipientWallet })
         }
-      } catch { /* notification failure should not block comment creation */ }
+        const botWallet = await resolveOracleBotWallet(pb, post)
+        if (botWallet && botWallet !== recipientWallet) {
+          broadcast({ type: 'new_notification', recipient: botWallet })
+        }
+      } catch { /* broadcast failure should not block comment creation */ }
 
       return comment
     } catch (e: unknown) {

@@ -2,6 +2,7 @@
  * Notification helpers — shared by comment handlers
  *
  * - resolvePostOwnerWallet: oracle posts → owner_wallet, human posts → author_wallet
+ * - resolveOracleBotWallet: oracle posts → bot_wallet, human posts → null
  * - createNotification: self-suppression, simple create
  */
 import type PocketBase from 'pocketbase'
@@ -27,8 +28,30 @@ export async function resolvePostOwnerWallet(
 }
 
 /**
+ * Resolve the oracle's own bot_wallet for a post.
+ * Returns bot_wallet if the post has oracle_birth_issue, else null.
+ */
+export async function resolveOracleBotWallet(
+  pb: PocketBase,
+  post: PostRecord,
+): Promise<string | null> {
+  if (!post.oracle_birth_issue) return null
+  try {
+    const data = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+      filter: `birth_issue="${post.oracle_birth_issue}"`,
+    })
+    const oracle = data.items?.[0]
+    return oracle?.bot_wallet?.toLowerCase() || null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Create a notification with self-suppression.
- * If actor === recipient, skip silently.
+ * Suppresses when:
+ * 1. actor === recipient (same wallet)
+ * 2. actor is a bot_wallet owned by recipient (oracle commenting on owner's behalf)
  */
 export async function createNotification(
   pb: PocketBase,
@@ -41,8 +64,21 @@ export async function createNotification(
     comment_id?: string
   },
 ): Promise<void> {
-  // Self-suppression
-  if (data.recipient_wallet.toLowerCase() === data.actor_wallet.toLowerCase()) return
+  const recipientLower = data.recipient_wallet.toLowerCase()
+  const actorLower = data.actor_wallet.toLowerCase()
+
+  // Self-suppression: same wallet
+  if (recipientLower === actorLower) return
+
+  // Self-suppression: actor is a bot owned by recipient
+  try {
+    const botCheck = await pb.collection('oracles').getList<OracleRecord>(1, 1, {
+      filter: `bot_wallet="${actorLower}" && owner_wallet="${recipientLower}"`,
+    })
+    if (botCheck.items.length > 0) return
+  } catch {
+    // Don't block notification on lookup failure
+  }
 
   try {
     await pb.collection('notifications').create({

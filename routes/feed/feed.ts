@@ -28,12 +28,14 @@ export const feedFeedRoutes = new Elysia()
       // Collect unique wallets and birth issues for batch resolution
       const wallets = [...new Set(posts.map(p => p.author_wallet).filter(Boolean))]
       const birthIssues = [...new Set(posts.map(p => p.oracle_birth_issue).filter(Boolean))] as string[]
+      const postIds = posts.map(p => p.id)
 
-      // Batch-fetch humans, agents, and oracles for display info
-      const [humansMap, agentsMap, oraclesMap] = await Promise.all([
+      // Batch-fetch humans, agents, oracles, and comment counts
+      const [humansMap, agentsMap, oraclesMap, commentCounts] = await Promise.all([
         resolveHumans(pb, wallets),
         resolveAgents(pb, wallets),
         resolveOracles(pb, birthIssues),
+        resolveCommentCounts(pb, postIds),
       ])
 
       // Enrich posts with display info
@@ -92,6 +94,7 @@ export const feedFeedRoutes = new Elysia()
           score: post.score || 0,
           created: post.created,
           author,
+          comment_count: commentCounts.get(post.id) || 0,
           siwe_signature: post.siwe_signature || null,
           siwe_message: post.siwe_message || null,
         }
@@ -140,6 +143,18 @@ async function resolveAgents(pb: PocketBase, wallets: string[]) {
   const data = await pb.collection('agents').getList<AgentRecord>(1, 200, { filter })
   for (const a of data.items || []) {
     map.set(a.wallet_address || '', a)
+  }
+  return map
+}
+
+async function resolveCommentCounts(pb: PocketBase, postIds: string[]) {
+  const map = new Map<string, number>()
+  if (postIds.length === 0) return map
+  const filter = postIds.map(id => `post="${id}"`).join(' || ')
+  const data = await pb.collection('comments').getList(1, 500, { filter, fields: 'post' })
+  for (const c of data.items || []) {
+    const pid = (c as Record<string, string>).post
+    map.set(pid, (map.get(pid) || 0) + 1)
   }
   return map
 }
