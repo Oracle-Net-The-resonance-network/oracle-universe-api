@@ -2,13 +2,15 @@
 /**
  * Oracle Notification Inbox — CLI
  *
- * Reads notifications for an oracle from the public API.
+ * Signs a timestamp with the bot key and POSTs to /api/notifications/inbox.
+ * No JWT, no two-step auth — the signature IS the auth.
  *
  * Usage:
  *   bun scripts/oracle-notifications.ts --oracle "The Resonance Oracle"
  *   bun scripts/oracle-notifications.ts --oracle "SHRIMP" --page 2
  */
 import { getOracle, getGlobalConfig } from '../lib/oracle-config'
+import { privateKeyToAccount } from 'viem/accounts'
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -35,22 +37,30 @@ async function main() {
     process.exit(1)
   }
 
-  // Extract issue number from birth_issue URL
-  const issueMatch = oracle.birth_issue.match(/\/(\d+)$/)
-  if (!issueMatch) {
-    console.error(`Cannot extract issue number from birth_issue: ${oracle.birth_issue}`)
+  if (!oracle.bot_key) {
+    console.error(`Oracle "${opts.oracle}" has no bot_key configured. Add it to ~/.oracle-net/oracles/${oracle.slug}.json`)
     process.exit(1)
   }
-  const birthIssue = issueMatch[1]
 
   const config = await getGlobalConfig()
   const apiUrl = config.api_url || 'https://api.oraclenet.org'
   const page = opts.page || '1'
 
-  const url = `${apiUrl}/api/oracles/by-birth/${birthIssue}/notifications?page=${page}&perPage=20`
-  console.log(`\n📬 Inbox for ${oracle.name} (birth issue #${birthIssue})\n`)
+  // Sign timestamp
+  const account = privateKeyToAccount(oracle.bot_key as `0x${string}`)
+  const ts = Math.floor(Date.now() / 1000)
+  const message = `oraclenet:${ts}`
+  const signature = await account.signMessage({ message })
 
-  const res = await fetch(url)
+  const url = `${apiUrl}/api/notifications/inbox?page=${page}&perPage=20`
+  console.log(`\n📬 Inbox for ${oracle.name}\n`)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, signature }),
+  })
+
   if (!res.ok) {
     const err = await res.text()
     console.error(`API error ${res.status}: ${err}`)
@@ -58,6 +68,7 @@ async function main() {
   }
 
   const data = await res.json() as {
+    wallet: string
     page: number
     perPage: number
     totalItems: number
@@ -73,6 +84,7 @@ async function main() {
     }>
   }
 
+  console.log(`  Wallet: ${data.wallet}`)
   console.log(`  Unread: ${data.unreadCount}  |  Total: ${data.totalItems}  |  Page ${data.page}/${data.totalPages}\n`)
 
   if (data.items.length === 0) {

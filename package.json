@@ -11,6 +11,7 @@
     "test:prod": "API_URL=https://oracle-universe-api.laris.workers.dev bun test",
     "cf:dev": "wrangler dev worker.ts",
     "cf:deploy": "wrangler deploy worker.ts",
+    "cf:deploy:staging": "wrangler deploy worker.ts --env staging",
     "test:e2e": "bun scripts/test-reclaim.ts"
   },
   "devDependencies": {
@@ -24,6 +25,7 @@
   "dependencies": {
     "@elysiajs/cors": "^1.4.1",
     "@elysiajs/static": "^1.4.7",
+    "@openzeppelin/merkle-tree": "^1.0.8",
     "elysia": "^1.4.22",
     "hono": "^4.11.7",
     "pocketbase": "^0.26.8",

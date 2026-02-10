@@ -1,15 +1,19 @@
 /**
  * Notification routes — inbox for wallet owners
  *
- * GET  /api/notifications           — paginated list + unreadCount
- * GET  /api/notifications/unread-count — lightweight poll endpoint
- * PATCH /api/notifications/:id/read  — mark one as read
- * PATCH /api/notifications/read-all  — mark all as read
+ * GET  /api/notifications           — paginated list + unreadCount (JWT)
+ * GET  /api/notifications/unread-count — lightweight poll endpoint (JWT)
+ * PATCH /api/notifications/:id/read  — mark one as read (JWT)
+ * PATCH /api/notifications/read-all  — mark all as read (JWT)
+ * POST /api/notifications/inbox      — signature-authenticated inbox (no JWT)
  */
 import { Elysia } from 'elysia'
+import { recoverMessageAddress } from 'viem'
 import { getAdminPB } from '../../lib/pb'
 import type { NotificationRecord, OracleRecord, HumanRecord } from '../../lib/pb-types'
 import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
+
+const INBOX_MAX_AGE_SEC = 300 // 5 minutes
 
 /** Extract wallet from JWT in Authorization header */
 async function getWalletFromAuth(request: Request): Promise<string | null> {
@@ -168,6 +172,119 @@ export const notificationsRoutes = new Elysia({ prefix: '/api/notifications' })
       }
 
       return { success: true, marked }
+    } catch (e: unknown) {
+      set.status = 500
+      const msg = e instanceof Error ? e.message : String(e)
+      return { error: msg }
+    }
+  })
+
+  // POST /api/notifications/inbox — signature-authenticated inbox (no JWT needed)
+  .post('/inbox', async ({ body, query, set }) => {
+    const { message, signature } = body as { message?: string; signature?: string }
+
+    if (!message || !signature) {
+      set.status = 400
+      return { error: 'message and signature required' }
+    }
+
+    // Validate format: "oraclenet:<unix_timestamp>"
+    const match = message.match(/^oraclenet:(\d+)$/)
+    if (!match) {
+      set.status = 400
+      return { error: 'message must be "oraclenet:<unix_timestamp>"' }
+    }
+
+    const ts = parseInt(match[1], 10)
+    const now = Math.floor(Date.now() / 1000)
+    if (Math.abs(now - ts) > INBOX_MAX_AGE_SEC) {
+      set.status = 401
+      return { error: `Timestamp expired (must be within ${INBOX_MAX_AGE_SEC}s)` }
+    }
+
+    let wallet: string
+    try {
+      wallet = (await recoverMessageAddress({
+        message,
+        signature: signature as `0x${string}`,
+      })).toLowerCase()
+    } catch {
+      set.status = 401
+      return { error: 'Invalid signature' }
+    }
+
+    const page = Number(query?.page) || 1
+    const perPage = Math.min(Number(query?.perPage) || 20, 50)
+
+    try {
+      const pb = await getAdminPB()
+
+      // Find all wallets belonging to this owner (owner_wallet on oracles)
+      const ownerOracles = await pb.collection('oracles').getList<OracleRecord>(1, 200, {
+        filter: `owner_wallet="${wallet}"`,
+      })
+      const botWallets = ownerOracles.items
+        .map(o => o.bot_wallet?.toLowerCase())
+        .filter(Boolean) as string[]
+
+      // Build filter: notifications for owner wallet OR any of their oracle bot wallets
+      const walletFilters = [wallet, ...botWallets].map(w => `recipient_wallet="${w}"`)
+      const recipientFilter = walletFilters.join(' || ')
+
+      const data = await pb.collection('notifications').getList<NotificationRecord>(page, perPage, {
+        filter: recipientFilter,
+        sort: '-created',
+      })
+
+      // Count unread
+      const unreadData = await pb.collection('notifications').getList<NotificationRecord>(1, 1, {
+        filter: `(${recipientFilter}) && read=false`,
+      })
+
+      // Enrich actor info
+      const actorWallets = [...new Set(data.items.map(n => n.actor_wallet).filter(Boolean))]
+      const actorMap = new Map<string, Record<string, unknown>>()
+
+      if (actorWallets.length > 0) {
+        const oracleFilter = actorWallets.map(w => `bot_wallet="${w}"`).join(' || ')
+        const oracles = await pb.collection('oracles').getList<OracleRecord>(1, 200, { filter: oracleFilter })
+        for (const o of oracles.items || []) {
+          if (o.bot_wallet) {
+            actorMap.set(o.bot_wallet.toLowerCase(), {
+              type: 'oracle', name: o.name, birth_issue: o.birth_issue,
+            })
+          }
+        }
+
+        const remaining = actorWallets.filter(w => !actorMap.has(w.toLowerCase()))
+        if (remaining.length > 0) {
+          const humanFilter = remaining.map(w => `wallet_address="${w}"`).join(' || ')
+          const humans = await pb.collection('humans').getList<HumanRecord>(1, 200, { filter: humanFilter })
+          for (const h of humans.items || []) {
+            actorMap.set(h.wallet_address.toLowerCase(), {
+              type: 'human', name: h.github_username || h.display_name || 'Human',
+              github_username: h.github_username,
+            })
+          }
+        }
+      }
+
+      const items = data.items.map(n => ({
+        ...n,
+        actor: actorMap.get(n.actor_wallet?.toLowerCase()) || {
+          type: 'unknown', name: `User-${n.actor_wallet?.slice(2, 8)}`,
+        },
+      }))
+
+      return {
+        wallet,
+        page,
+        perPage,
+        totalItems: data.totalItems,
+        totalPages: data.totalPages,
+        unreadCount: unreadData.totalItems,
+        items,
+      }
     } catch (e: unknown) {
       set.status = 500
       const msg = e instanceof Error ? e.message : String(e)

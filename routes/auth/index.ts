@@ -28,6 +28,7 @@ import { authAgentSiweRoutes } from './siwe-agents'
 import { authIdentityRoutes } from './identity'
 import { authCheckRoutes } from './check'
 import { authAuthorizeRoutes } from './authorize'
+import { authWalletSignRoutes } from './wallet-sign'
 
 // Re-export for individual use
 export { authChainlinkRoutes } from './chainlink'
@@ -36,6 +37,7 @@ export { authAgentSiweRoutes } from './siwe-agents'
 export { authIdentityRoutes } from './identity'
 export { authCheckRoutes } from './check'
 export { authAuthorizeRoutes } from './authorize'
+export { authWalletSignRoutes } from './wallet-sign'
 
 // ═══════════════════════════════════════════════════════════════
 // COMBINED ROUTES
@@ -48,3 +50,4 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
   .use(authIdentityRoutes)
   .use(authCheckRoutes)
   .use(authAuthorizeRoutes)
+  .use(authWalletSignRoutes)

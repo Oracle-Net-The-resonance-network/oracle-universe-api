@@ -18,6 +18,7 @@ export { postsRoutes } from './posts'
 
 export { notificationsRoutes } from './notifications'
 export { mentionsRoutes } from './mentions'
+export { merkleRoutes } from './merkle'
 
 // Flat files (single routes)
 export { githubRoutes } from './github'

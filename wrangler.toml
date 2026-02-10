@@ -9,3 +9,12 @@ routes = [
 ]
 
 # POCKETBASE_URL is set as a wrangler secret (private)
+
+# --- Staging environment ---
+# Deploy:  wrangler deploy worker.ts --env staging
+# Secrets: wrangler secret put PB_ADMIN_EMAIL --env staging  (etc.)
+# URL:     oracle-universe-api-staging.laris.workers.dev
+[env.staging]
+name = "oracle-universe-api-staging"
+workers_dev = true
+routes = []
