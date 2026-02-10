@@ -1,28 +1,46 @@
 /**
- * Oracle inbox — public notification endpoints
+ * Oracle inbox — authenticated notification endpoints
  *
  * GET /api/oracles/by-birth/:birthIssue/notifications          — paginated list + unreadCount
  * GET /api/oracles/by-birth/:birthIssue/notifications/unread-count — lightweight poll
  *
- * No auth required — oracle inboxes are public (like a timeline).
+ * Requires JWT auth — wallet must be the oracle's bot_wallet or owner_wallet.
  * birthIssue is the issue number (e.g. "143" from oracle-v2#143).
  */
 import { Elysia } from 'elysia'
 import { getAdminPB } from '../../lib/pb'
 import type { NotificationRecord, OracleRecord, HumanRecord } from '../../lib/pb-types'
+import { verifyJWT, DEFAULT_SALT } from '../../lib/auth'
 
-/** Resolve birthIssue number → oracle bot_wallet */
-async function resolveBotWallet(birthIssue: string): Promise<string | null> {
+/** Extract wallet from JWT in Authorization header */
+async function getWalletFromAuth(request: Request): Promise<string | null> {
+  const authHeader = request.headers.get('Authorization')
+  if (!authHeader) return null
+  const token = authHeader.replace(/^Bearer\s+/i, '')
+  if (!token) return null
+  const payload = await verifyJWT(token, DEFAULT_SALT)
+  if (!payload?.sub) return null
+  return payload.sub as string
+}
+
+/** Resolve birthIssue number → oracle record */
+async function resolveOracle(birthIssue: string): Promise<OracleRecord | null> {
   const pb = await getAdminPB()
-  // birth_issue in PB stores the full URL; match by suffix
   const data = await pb.collection('oracles').getList<OracleRecord>(1, 10, {
     filter: `birth_issue~"/${birthIssue}"`,
   })
-  // Find exact match (ends with /birthIssue)
-  const oracle = data.items.find(o =>
+  return data.items.find(o =>
     o.birth_issue?.endsWith(`/${birthIssue}`)
+  ) || null
+}
+
+/** Check if wallet is authorized to read this oracle's notifications */
+function isAuthorized(oracle: OracleRecord, wallet: string): boolean {
+  const w = wallet.toLowerCase()
+  return (
+    oracle.bot_wallet?.toLowerCase() === w ||
+    oracle.owner_wallet?.toLowerCase() === w
   )
-  return oracle?.bot_wallet?.toLowerCase() || null
 }
 
 /** Enrich actor wallets with oracle/human identity */
@@ -63,11 +81,28 @@ async function enrichActors(
 
 export const oraclesNotificationsRoutes = new Elysia()
   // GET /api/oracles/by-birth/:birthIssue/notifications
-  .get('/by-birth/:birthIssue/notifications', async ({ params, query, set }) => {
-    const botWallet = await resolveBotWallet(params.birthIssue)
-    if (!botWallet) {
+  .get('/by-birth/:birthIssue/notifications', async ({ params, query, request, set }) => {
+    const wallet = await getWalletFromAuth(request)
+    if (!wallet) {
+      set.status = 401
+      return { error: 'Valid JWT required. Use POST /api/auth/wallet-sign to authenticate.' }
+    }
+
+    const oracle = await resolveOracle(params.birthIssue)
+    if (!oracle) {
       set.status = 404
       return { error: `No oracle found for birth issue #${params.birthIssue}` }
+    }
+
+    if (!isAuthorized(oracle, wallet)) {
+      set.status = 403
+      return { error: 'Not authorized — wallet must be oracle owner or bot' }
+    }
+
+    const botWallet = oracle.bot_wallet?.toLowerCase()
+    if (!botWallet) {
+      set.status = 404
+      return { error: 'Oracle has no bot wallet' }
     }
 
     const page = Number(query?.page) || 1
@@ -111,11 +146,28 @@ export const oraclesNotificationsRoutes = new Elysia()
   })
 
   // GET /api/oracles/by-birth/:birthIssue/notifications/unread-count
-  .get('/by-birth/:birthIssue/notifications/unread-count', async ({ params, set }) => {
-    const botWallet = await resolveBotWallet(params.birthIssue)
-    if (!botWallet) {
+  .get('/by-birth/:birthIssue/notifications/unread-count', async ({ params, request, set }) => {
+    const wallet = await getWalletFromAuth(request)
+    if (!wallet) {
+      set.status = 401
+      return { error: 'Valid JWT required. Use POST /api/auth/wallet-sign to authenticate.' }
+    }
+
+    const oracle = await resolveOracle(params.birthIssue)
+    if (!oracle) {
       set.status = 404
       return { error: `No oracle found for birth issue #${params.birthIssue}` }
+    }
+
+    if (!isAuthorized(oracle, wallet)) {
+      set.status = 403
+      return { error: 'Not authorized — wallet must be oracle owner or bot' }
+    }
+
+    const botWallet = oracle.bot_wallet?.toLowerCase()
+    if (!botWallet) {
+      set.status = 404
+      return { error: 'Oracle has no bot wallet' }
     }
 
     try {
